@@ -392,7 +392,7 @@ def _plot_hazard_map(hazard_index, hazard_zones, safest_sites):
              ha="center", fontsize=7, color="gray", style="italic")
 
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "hazard_risk_map.png", dpi=180)
+    safe_savefig(fig, cfg.OUT / "hazard_risk_map.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] hazard_risk_map.png")
 
@@ -440,7 +440,7 @@ def _plot_hazard_evidence(flood, slope, erosion, fire, drought):
         fontsize=12, color=cfg.BRAND_COLOR, y=1.01
     )
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "hazard_evidence_layers.png", dpi=150)
+    safe_savefig(fig, cfg.OUT / "hazard_evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] hazard_evidence_layers.png")
 
@@ -499,7 +499,7 @@ def _plot_hazard_zoom(hazard_index, hazard_zones, safest_sites):
              "Screening-level analysis only. Not an engineering geotechnical certification.",
              ha="center", fontsize=7, color="gray", style="italic")
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "site_hazard_zoom.png", dpi=200)
+    safe_savefig(fig, cfg.OUT / "site_hazard_zoom.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] site_hazard_zoom.png")
 

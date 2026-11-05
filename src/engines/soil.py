@@ -431,7 +431,7 @@ def _plot_soil_map(sci, zones, candidates):
              ha="center", fontsize=7, color="gray", style="italic")
 
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "soil_capability_map.png", dpi=180)
+    safe_savefig(fig, cfg.OUT / "soil_capability_map.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] soil_capability_map.png")
 
@@ -459,7 +459,7 @@ def _plot_evidence_layers(erosion, moisture, veg, lc_suit, wetness, rainfall, lc
         fontsize=12, color=cfg.BRAND_COLOR, y=1.01
     )
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "soil_evidence_layers.png", dpi=150)
+    safe_savefig(fig, cfg.OUT / "soil_evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] soil_evidence_layers.png")
 
@@ -520,7 +520,7 @@ def _plot_zone_zoom(sci, zones, candidates):
              "⚠ Satellite screening only. Agronomic field verification required.",
              ha="center", fontsize=7, color="gray", style="italic")
     fig.tight_layout()
-    safe_savefig(fig, cfg.OUT / "soil_zone_zoom.png", dpi=200)
+    safe_savefig(fig, cfg.OUT / "soil_zone_zoom.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
     print("  [OK] soil_zone_zoom.png")
 

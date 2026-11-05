@@ -284,7 +284,7 @@ def run_water_survey(
 
 def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, candidates: list[dict], breaks: np.ndarray):
     """Render high-resolution cartographic classified groundwater potential map."""
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+    fig, ax = plt.subplots(figsize=(10, 10), dpi=cfg.MAP_DPI)
 
     # Palette: Water (Blue), Very Low (Red), Low (Orange), Moderate (Yellow), High (Light Green), Very High (Dark Green), Builtup (Purple/Gray)
     colors = ["#1f77b4", "#d73027", "#f46d43", "#fdae61", "#a6d96a", "#1a9850", "#7f7f7f"]
@@ -329,13 +329,13 @@ def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, can
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "groundwater_potential_map.png", dpi=200)
+    safe_savefig(plt, cfg.OUT / "groundwater_potential_map.png", dpi=cfg.MAP_DPI)
     plt.close()
 
 
 def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain):
     """Render 8-panel diagnostic plot of all evidence layers."""
-    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=180)
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=cfg.MAP_DPI)
     panels = [
         ("DEM Elevation (m)", dem, "terrain"),
         ("Slope (degrees)", slope, "magma"),
@@ -355,13 +355,13 @@ def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain)
 
     plt.suptitle(f"SiteSurveyor AI — Groundwater Evidence Layers [{cfg.CLIENT}]", fontsize=13, color=cfg.BRAND_COLOR, y=0.98)
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "evidence_layers.png", dpi=180)
+    safe_savefig(plt, cfg.OUT / "evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close()
 
 
 def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]):
     """Render 5x5 km local zoom centered on target site."""
-    fig, ax = plt.subplots(figsize=(7, 7), dpi=200)
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=cfg.MAP_DPI)
 
     # 5x5 km window around target (approx 167x167 pixels)
     half_px = int(2500 / cfg.CELL)
@@ -396,7 +396,7 @@ def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]
     ax.legend(loc="lower right", fontsize=8)
 
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "site_zoom_map.png", dpi=200)
+    safe_savefig(plt, cfg.OUT / "site_zoom_map.png", dpi=cfg.MAP_DPI)
     plt.close()
 
 

@@ -53,6 +53,10 @@ ANALYST = "Eineva Labs"
 BRAND_COLOR = "#0b4f6c"
 CELL = 30.0  # metres
 
+# Map render buffers scale with the square of this, and at 200 the export stage alone
+# pushed the 512 MB instance over its limit. These maps are read on screen, not printed.
+MAP_DPI = int(os.getenv("MAP_DPI", "150"))
+
 # --- Water Model Weights (AHP) ---
 WATER_WEIGHTS = {
     "lineament_density": 0.26,
