@@ -362,10 +362,32 @@ def _run_survey(payload: dict, base_url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Job store (in-process; one survey per process by design)
+# Job store (persisted to disk in cfg.DATA_DIR / "jobs" + memory cache)
 # ---------------------------------------------------------------------------
 _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
+JOBS_DIR = cfg.DATA_DIR / "jobs"
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _save_job_to_disk(job: dict) -> None:
+    try:
+        path = JOBS_DIR / f"{job['id']}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(job, f)
+    except Exception as e:
+        logger.warning("Could not persist job %s to disk: %s", job.get("id"), e)
+
+
+def _load_job_from_disk(job_id: str) -> dict | None:
+    path = JOBS_DIR / f"{job_id}.json"
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Could not load job %s from disk: %s", job_id, e)
+    return None
 
 
 def _prune_jobs() -> None:
@@ -373,6 +395,12 @@ def _prune_jobs() -> None:
     with _JOBS_LOCK:
         for job_id in [jid for jid, job in _JOBS.items() if job["submitted_at"] < cutoff]:
             _JOBS.pop(job_id, None)
+    try:
+        for f in JOBS_DIR.glob("*.json"):
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _create_job(payload: dict) -> dict:
@@ -391,14 +419,20 @@ def _create_job(payload: dict) -> dict:
     }
     with _JOBS_LOCK:
         _JOBS[job["id"]] = job
+    _save_job_to_disk(job)
     return job
 
 
 def _update_job(job_id: str, **fields) -> None:
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
+        if job is None:
+            job = _load_job_from_disk(job_id)
+            if job:
+                _JOBS[job_id] = job
         if job is not None:
             job.update(fields)
+            _save_job_to_disk(job)
 
 
 def _job_snapshot(job: dict, include_result: bool = True) -> dict:
@@ -619,6 +653,10 @@ def get_job_endpoint(job_id: str):
     _prune_jobs()
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
+        if job is None:
+            job = _load_job_from_disk(job_id)
+            if job:
+                _JOBS[job_id] = job
         snapshot = _job_snapshot(job) if job else None
     if snapshot is None:
         raise _api_error(

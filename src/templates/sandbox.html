@@ -1874,9 +1874,24 @@
 
       /* -------------------------------------------------------------- run */
       async function pollJob(jobId) {
+        var notFoundRetries = 0;
         for (var attempt = 0; attempt < POLL_LIMIT; attempt++) {
           await sleep(POLL_INTERVAL_MS);
-          var job = await fetchJson('/api/jobs/' + encodeURIComponent(jobId), {}, 30000);
+          var job = null;
+          try {
+            job = await fetchJson('/api/jobs/' + encodeURIComponent(jobId), {}, 30000);
+            notFoundRetries = 0;
+          } catch (pollErr) {
+            // Tolerate transient 404s or network blips during polling (e.g. rolling deploy or load balancer warmup)
+            if (pollErr.code === 'job_not_found' || (pollErr.message && pollErr.message.indexOf('No survey job') !== -1)) {
+              notFoundRetries++;
+              if (notFoundRetries <= 6) {
+                setJobStatus('running', 'Syncing survey status…');
+                continue;
+              }
+            }
+            throw pollErr;
+          }
 
           if (job.status === 'succeeded') {
             updateProgress(100, 'Complete');
