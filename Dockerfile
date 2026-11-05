@@ -53,17 +53,11 @@ RUN python -c "import src.api; print('app imports clean')"
 
 EXPOSE 8000
 
-# $$ escapes Dockerfile substitution so ${PORT} is read from the *runtime* environment.
-# Written unescaped, Docker resolves it at build time and bakes in 8000 -- the image then
-# listens on a port Render never routes to, because Render assigns $PORT per instance.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -sf "http://localhost:$${PORT:-8000}/health" || exit 1
+# The port and worker count live in a script, not here: see docker-entrypoint.sh.
+# No Docker HEALTHCHECK either -- it cannot reference the runtime-assigned $PORT without
+# the same substitution trap, and Render health-checks through healthCheckPath instead.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Start FastAPI + MCP SSE server via Uvicorn.
-# One worker is deliberate: the engines read the AOI from process-global src.config and
-# every survey writes the same fixed filenames under /app/outputs. Multiple workers would
-# each hold their own config and lock, so two concurrent requests could analyse different
-# sites while overwriting each other's deliverables. Raise this only after the planned
-# immutable per-job SiteContext + namespaced output directory lands.
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port $${PORT:-8000} --workers 1"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
