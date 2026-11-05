@@ -137,8 +137,10 @@ TARGET_ROW: int = 0
 # Neutral defaults on purpose: a real person's name and street address used to be baked
 # into these and published on the public dossier of every instance, including installs
 # that never ran a survey of that property.
-CLIENT: str = "Site Survey"
-CLIENT_ADDRESS: str = "Property location not specified"
+DEFAULT_CLIENT: str = "Site Survey"
+DEFAULT_CLIENT_ADDRESS: str = "Property location not specified"
+CLIENT: str = DEFAULT_CLIENT
+CLIENT_ADDRESS: str = DEFAULT_CLIENT_ADDRESS
 RAW: Path = RAW_BASE
 AOI_SLUG: str = ""
 
@@ -219,6 +221,17 @@ def set_target_site(
     AOI_SLUG = f"{abs(TARGET_LAT):.2f}{lat_h}_{abs(TARGET_LON):.2f}{lon_h}"
     RAW = RAW_BASE / AOI_SLUG
     RAW.mkdir(parents=True, exist_ok=True)
+
+
+def clear_target_site() -> None:
+    """Return the live AOI and client identity to the neutral defaults.
+
+    ``set_target_site`` only overwrites CLIENT when handed a truthy name, so a finished
+    survey's client sticks to the module until something replaces it. Wiping the processed
+    data has to replace it, or the next report would stamp this client's name on an
+    instance that now holds no data about them at all.
+    """
+    set_target_site(client=DEFAULT_CLIENT, address=DEFAULT_CLIENT_ADDRESS)
 
 
 # Initialize default AOI on import (Gweru, Zimbabwe)

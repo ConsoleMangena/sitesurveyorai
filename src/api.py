@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -78,6 +79,14 @@ class TargetRequest(BaseModel):
     longitude: float = Field(..., ge=-180, le=180, description="Target longitude in decimal degrees")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of ranked candidates to return")
     half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
+
+
+class ResetRequest(BaseModel):
+    confirm: str = Field(
+        ...,
+        description="Must repeat the confirm_phrase returned by GET /api/storage. A caller that "
+                    "has not read what it is about to delete cannot clear the workspace.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +299,28 @@ def _internal_error(exc: Exception, request_id: str) -> HTTPException:
     )
 
 
+def _require_same_origin(request: Request) -> None:
+    """Refuse a write that a foreign page triggered.
+
+    The engine carries no authentication and is reachable from the public internet, and
+    /api/* grows CORS middleware only when ALLOWED_ORIGINS is set -- so without this guard
+    any page the operator happens to have open could POST here and delete every
+    deliverable the instance holds. Browsers always attach Origin to a cross-origin POST,
+    which makes that path checkable; non-browser callers (curl, scheduled jobs, MCP
+    agents) send no Origin and are unaffected.
+    """
+    origin = request.headers.get("origin")
+    if origin and origin not in _origins and not _is_same_origin(origin, request.headers.get("host")):
+        logger.warning("Rejected cross-origin write to %s from Origin %s", request.url.path, origin)
+        raise _api_error(
+            403,
+            "cross_origin_write",
+            "This request was refused because it came from another site.",
+            "Only the bundled sandbox on this host may clear workspace data. To call this "
+            "endpoint from a different origin, add that origin to ALLOWED_ORIGINS.",
+        )
+
+
 def _check_coverage(lat: float, lon: float) -> None:
     if not (COVERAGE_LAT[0] <= lat <= COVERAGE_LAT[1] and COVERAGE_LON[0] <= lon <= COVERAGE_LON[1]):
         raise _api_error(
@@ -328,6 +359,82 @@ def _deliverables(base_url: str) -> tuple[dict[str, str], list[str]]:
         else:
             missing.append(key)
     return urls, missing
+
+
+# The engines write one summary per category; the dossier is compiled from those and
+# nothing else, which makes them the honest test for "has anything been surveyed here".
+CATEGORY_INPUTS = ("summary.json", "mineral_summary.json", "soil_summary.json", "hazard_summary.json")
+
+WIPE_CONFIRMATION = "wipe-processed-data"
+
+
+def _has_category_inputs() -> bool:
+    return any((cfg.OUT / name).exists() for name in CATEGORY_INPUTS)
+
+
+def _dir_usage(path: Path, pattern: str = "*", recursive: bool = False) -> tuple[int, int]:
+    """Count files and bytes without failing on a tree that is mid-write."""
+    files = 0
+    nbytes = 0
+    if not path.exists():
+        return files, nbytes
+    walker = path.rglob if recursive else path.glob
+    try:
+        for entry in walker(pattern):
+            if entry.is_file():
+                files += 1
+                try:
+                    nbytes += entry.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return files, nbytes
+
+
+def _storage_report() -> dict:
+    out_files, out_bytes = _dir_usage(cfg.OUT)
+    job_files, job_bytes = _dir_usage(JOBS_DIR, "*.json")
+    site_dirs = [d for d in cfg.RAW_BASE.iterdir() if d.is_dir()] if cfg.RAW_BASE.exists() else []
+    imagery_files, imagery_bytes = _dir_usage(cfg.RAW_BASE, "*", recursive=True)
+    return {
+        "outputs": {"files": out_files, "bytes": out_bytes, "path": str(cfg.OUT)},
+        "jobs": {"files": job_files, "bytes": job_bytes},
+        "imagery": {"sites": len(site_dirs), "files": imagery_files, "bytes": imagery_bytes},
+        "confirm_phrase": WIPE_CONFIRMATION,
+        "active_aoi": cfg.AOI_SLUG,
+        "active_client": cfg.CLIENT,
+        "state_dir_persistent": cfg.STATE_DIR != cfg.ROOT,
+    }
+
+
+def _clear_dir(path: Path) -> tuple[int, int, list[str]]:
+    """Delete the contents of a directory, never the directory itself.
+
+    /outputs is a live StaticFiles mount, so removing it would break every download link
+    until the process restarted. A file that refuses to go (an open PDF, a Windows lock)
+    is reported instead of hidden: the page has to say what is actually gone.
+    """
+    removed = 0
+    nbytes = 0
+    failed: list[str] = []
+    if not path.exists():
+        return removed, nbytes, failed
+    for entry in sorted(path.iterdir()):
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                size = _dir_usage(entry)[1]
+                shutil.rmtree(entry)
+                removed += 1
+                nbytes += size
+            else:
+                size = entry.stat().st_size
+                entry.unlink()
+                removed += 1
+                nbytes += size
+        except OSError as e:
+            failed.append(f"{entry.name}: {e.strerror or e}")
+    return removed, nbytes, failed
 
 
 def _run_survey(payload: dict, base_url: str) -> dict:
@@ -590,6 +697,8 @@ async def health_check():
             "api_hazard": "/api/hazard",
             "api_dossier": "/api/dossier",
             "api_report": "/api/report",
+            "api_storage": "/api/storage",
+            "api_reset": "/api/reset",
             "docs": "/docs",
         },
     }
@@ -745,6 +854,13 @@ def get_dossier_endpoint():
     """Retrieve the master cross-category site intelligence dossier JSON."""
     dossier_path = cfg.OUT / "master_site_dossier.json"
     if not dossier_path.exists():
+        if not _has_category_inputs():
+            raise _api_error(
+                404,
+                "no_survey",
+                "No survey has been run on this instance yet.",
+                "Run a survey; the dossier is compiled from the category summaries it writes.",
+            )
         from src.report import generate_site_dossier
         # Regenerating reads whatever AOI src.config currently points at, so it
         # must not overlap a survey in flight.
@@ -756,11 +872,99 @@ def get_dossier_endpoint():
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/deliverables", tags=["Reports & Deliverables"])
+def get_deliverables_endpoint(request: Request):
+    """Which survey files exist right now.
+
+    The sandbox disables exports the survey did not produce, but on a fresh instance no
+    survey has run yet and the links still point at files that are not there. This lets
+    the page check the same list the survey results carry, instead of guessing.
+    """
+    urls, missing = _deliverables(str(request.base_url).rstrip("/"))
+    return JSONResponse(
+        content={"download_urls": urls, "deliverables_missing": missing},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/storage", tags=["Reports & Deliverables"])
+def get_storage_endpoint():
+    """What this instance is holding, split by what a reset removes and what it leaves alone.
+
+    The sandbox puts these numbers in the confirmation dialog instead of describing the
+    deletion in the abstract, and reads back the phrase the wipe has to repeat.
+    """
+    return JSONResponse(content=_storage_report(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/reset", tags=["Reports & Deliverables"])
+def reset_workspace_endpoint(req: ResetRequest, request: Request):
+    """Clear every processed artefact: the deliverables in /outputs and the job history.
+
+    Downloaded Digital Earth imagery under data/raw is input rather than output — several
+    hundred MB that only a fresh AOI needs, and slow to refetch — so it is reported and
+    left in place. The live AOI and client identity do go back to the neutral defaults:
+    a workspace holding no results must not keep presenting the last survey's target and
+    client name as its own.
+    """
+    _require_same_origin(request)
+    if req.confirm != WIPE_CONFIRMATION:
+        raise _api_error(
+            400,
+            "confirm_required",
+            "The workspace was not cleared.",
+            f'POST /api/reset must body {{"confirm": "{WIPE_CONFIRMATION}"}}. Read '
+            "GET /api/storage first to see what would be deleted.",
+        )
+
+    with _JOBS_LOCK:
+        in_flight = sorted(j["id"] for j in _JOBS.values() if j["status"] in ("queued", "running"))
+    if in_flight:
+        raise _api_error(
+            409,
+            "survey_in_progress",
+            f"{len(in_flight)} survey job(s) are still running on this instance.",
+            "Wait for them to finish. Clearing now would delete files the engine is still "
+            "writing and leave half a survey on disk.",
+        )
+
+    out_files, out_bytes, out_failed = _clear_dir(cfg.OUT)
+    job_files, job_bytes, job_failed = _clear_dir(JOBS_DIR)
+    failed = out_failed + job_failed
+
+    with _JOBS_LOCK:
+        _JOBS.clear()
+    cfg.clear_target_site()
+
+    logger.info(
+        "Workspace cleared: %d output file(s) (%d bytes), %d job file(s) (%d bytes), %d failure(s)",
+        out_files, out_bytes, job_files, job_bytes, len(failed),
+    )
+    return JSONResponse(
+        content={
+            "cleared": {
+                "outputs": {"files": out_files, "bytes": out_bytes},
+                "jobs": {"files": job_files, "bytes": job_bytes},
+            },
+            "kept": {"imagery": _storage_report()["imagery"]},
+            "failed": failed,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/report", tags=["Reports & Deliverables"])
 def get_report_endpoint():
     """View the standalone HTML Executive Intelligence Dossier directly in the browser."""
     html_path = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
     if not html_path.exists():
+        if not _has_category_inputs():
+            raise _api_error(
+                404,
+                "no_survey",
+                "No survey has been run on this instance yet.",
+                "Run a survey; the report is compiled from the category summaries it writes.",
+            )
         from src.report import generate_site_dossier
         with _SITE_LOCK:
             generate_site_dossier()

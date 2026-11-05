@@ -32,6 +32,7 @@
       --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
       --radius: 0.625rem;
       --radius-sm: 0.375rem;
+      --radius-md: 0.5rem;
       --radius-lg: 0.75rem;
       
       /* Brand Red (confirmed Mother Platform token #D14141) */
@@ -70,7 +71,9 @@
       --text: #f8fafc;
       --text-h: #ffffff;
       --muted: #94a3b8;
-      --dim: #64748b;
+      --dim: #7d8ea6;
+      --sel-bg: rgba(209, 65, 65, 0.32);
+      --sel-fg: #ffffff;
       --accent: var(--brand);
       --accent-soft: var(--brand-muted);
       --shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
@@ -78,6 +81,14 @@
       --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(209, 65, 65, 0.45);
       --table-head-bg: #141c2e;
       --table-row-hover: rgba(209, 65, 65, 0.08);
+
+      /* Score bands, error and advisory surfaces -- tuned per theme so the
+         meaning never depends on a hue that only survives on one background. */
+      --high-fg: #34d399; --high-bg: rgba(16, 185, 129, 0.15); --high-line: rgba(16, 185, 129, 0.30);
+      --mid-fg: #fbbf24;  --mid-bg: rgba(245, 158, 11, 0.15);  --mid-line: rgba(245, 158, 11, 0.30);
+      --low-fg: #f87171;  --low-bg: rgba(239, 68, 68, 0.15);   --low-line: rgba(239, 68, 68, 0.30);
+      --err-fg: #fca5a5;  --err-strong: #fee2e2;  --err-bg: rgba(239, 68, 68, 0.08);  --err-line: rgba(239, 68, 68, 0.40);
+      --warn-fg: #fbbf24; --warn-strong: #fde68a; --warn-bg: rgba(245, 158, 11, 0.10); --warn-line: rgba(245, 158, 11, 0.32);
     }
 
     /* ── Light theme ── */
@@ -93,8 +104,10 @@
       --line-strong: #cbd5e1;
       --text: #0f172a;
       --text-h: #020617;
-      --muted: #64748b;
-      --dim: #94a3b8;
+      --muted: #475569;
+      --dim: #5c6b81;
+      --sel-bg: rgba(209, 65, 65, 0.18);
+      --sel-fg: #020617;
       --accent: var(--brand);
       --accent-soft: var(--brand-muted);
       --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
@@ -102,6 +115,12 @@
       --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(209, 65, 65, 0.35);
       --table-head-bg: #f8fafc;
       --table-row-hover: rgba(209, 65, 65, 0.05);
+
+      --high-fg: #065f46; --high-bg: rgba(16, 185, 129, 0.14); --high-line: rgba(16, 185, 129, 0.35);
+      --mid-fg: #92400e;  --mid-bg: rgba(245, 158, 11, 0.16);  --mid-line: rgba(245, 158, 11, 0.40);
+      --low-fg: #b91c1c;  --low-bg: rgba(239, 68, 68, 0.12);   --low-line: rgba(239, 68, 68, 0.32);
+      --err-fg: #991b1b;  --err-strong: #7f1d1d;  --err-bg: #fef2f2;  --err-line: #fecaca;
+      --warn-fg: #92400e; --warn-strong: #78350f; --warn-bg: #fffbeb; --warn-line: #fde68a;
     }
 
     * { box-sizing: border-box; }
@@ -129,6 +148,19 @@
       outline: 2px solid var(--brand);
       outline-offset: 2px;
     }
+
+    /* Browser-drawn surfaces belong to the design system too. */
+    ::selection { background: var(--sel-bg); color: var(--sel-fg); }
+    input, textarea { caret-color: var(--brand); }
+    html { scrollbar-color: var(--line-strong) var(--bg-deep); scrollbar-width: thin; }
+    html::-webkit-scrollbar { width: 11px; height: 11px; }
+    html::-webkit-scrollbar-track { background: var(--bg-deep); }
+    html::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border-radius: 999px;
+      border: 3px solid var(--bg-deep);
+    }
+    html::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -245,8 +277,9 @@
     .toolbar {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       margin-left: auto;
+      min-width: 0;
       flex-wrap: nowrap;
       overflow-x: auto;
       scrollbar-width: none;
@@ -258,7 +291,7 @@
       align-items: center;
       gap: 7px;
       height: 32px;
-      padding: 0 12px;
+      padding: 0 11px;
       border-radius: var(--radius-sm);
       border: 1px solid var(--line);
       background: var(--panel-raised);
@@ -306,6 +339,21 @@
       width: 32px;
       justify-content: center;
     }
+
+    /* Clearing the workspace is the only irreversible thing on this page, so it wears
+       neither the brand red (which means "run") nor a loud warning fill. It stays quiet
+       until you touch it, and then borrows the same error surface the alerts use. */
+    .tool--danger {
+      background: transparent;
+      border-color: transparent;
+      color: var(--muted);
+    }
+    .tool--danger:hover:not(:disabled) {
+      background: var(--err-bg);
+      border-color: var(--err-line);
+      color: var(--err-fg);
+    }
+    .tool--danger:disabled { opacity: 0.45; cursor: progress; }
     .tool--active,
     .tool.is-active {
       background: var(--panel-sunken);
@@ -318,6 +366,14 @@
       background: var(--line);
       margin: 0 3px;
       flex: 0 0 auto;
+    }
+
+    .tool__label { white-space: nowrap; }
+
+    @media (pointer: coarse) {
+      .tool { height: 38px; }
+      .tool--icon { width: 38px; }
+      .icon-btn { width: 34px; height: 34px; }
     }
 
     /* Dark/Light mode icon toggling */
@@ -581,7 +637,7 @@
 
     .swatch {
       width: 11px; height: 11px; border-radius: 3px; flex: 0 0 auto;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      border: 1px solid var(--line-strong);
     }
     .swatch--water { background: var(--water); }
     .swatch--mineral { background: var(--mineral); }
@@ -598,9 +654,9 @@
       flex: 1; text-align: center; padding: 4px 0;
       border-radius: 4px;
     }
-    .band-low { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.25); }
-    .band-mid { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.25); }
-    .band-high { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); }
+    .band-low { background: var(--low-bg); color: var(--low-fg); border: 1px solid var(--low-line); }
+    .band-mid { background: var(--mid-bg); color: var(--mid-fg); border: 1px solid var(--mid-line); }
+    .band-high { background: var(--high-bg); color: var(--high-fg); border: 1px solid var(--high-line); }
 
     .kv { display: flex; flex-direction: column; gap: 9px; }
     .kv > div { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: baseline; }
@@ -712,6 +768,16 @@
       font-size: 10px; font-weight: 800; color: #ffffff;
       box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
     }
+
+    /* The target is a reticle, not a stock map pin: it must read as "the point being
+       screened" and stay distinct from the ranked candidate pins beside it. */
+    .target-pin {
+      width: 30px; height: 30px;
+      display: grid; place-items: center;
+      filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.6));
+    }
+    .target-pin svg { display: block; }
+    .leaflet-marker-icon.target-pin { background: none; border: 0; }
 
     /* ------------------------------------------------------------------ analysis form */
     .field { margin-bottom: 12px; }
@@ -850,18 +916,18 @@
 
     .alert {
       margin-top: 12px;
-      border: 1px solid rgba(239, 68, 68, 0.4);
+      border: 1px solid var(--err-line);
       border-left: 3px solid var(--bad);
-      background: rgba(239, 68, 68, 0.08);
+      background: var(--err-bg);
       border-radius: var(--radius-sm);
       padding: 10px 12px;
       font-size: 11.5px;
       line-height: 1.5;
-      color: #fca5a5;
+      color: var(--err-fg);
     }
-    .alert strong { display: block; font-size: 12px; margin-bottom: 3px; color: #fee2e2; }
-    .alert .alert__hint { color: #fca5a5; margin-top: 5px; }
-    .alert .alert__id { font-family: var(--font-mono); font-size: 10px; color: #f87171; margin-top: 6px; }
+    .alert strong { display: block; font-size: 12px; margin-bottom: 3px; color: var(--err-strong); }
+    .alert .alert__hint { color: var(--err-fg); margin-top: 5px; }
+    .alert .alert__id { font-family: var(--font-mono); font-size: 10px; color: var(--low-fg); margin-top: 6px; }
 
     /* ------------------------------------------------------------------ indicators */
     .note {
@@ -875,6 +941,12 @@
       margin-bottom: 12px;
     }
     .note[hidden] { display: none; }
+    .note--warn {
+      color: var(--warn-fg);
+      background: var(--warn-bg);
+      border-color: var(--warn-line);
+    }
+    .note--warn strong { color: var(--warn-strong); }
 
     .indicators { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
@@ -894,6 +966,15 @@
     .indicator__top {
       display: flex; align-items: center; gap: 6px;
       margin-bottom: 8px;
+    }
+    /* Engine class names such as "Moderate Hazard (Engineering Mitigation)" cannot fit a
+       198px pill, so it truncates rather than running over the card edge; the full text
+       stays in the title attribute. */
+    .indicator__top .tag {
+      min-width: 0;
+      max-width: 68%;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .indicator__label {
       font-size: 10px; font-weight: 700;
@@ -938,9 +1019,9 @@
       color: var(--muted);
       white-space: nowrap;
     }
-    .tag--high { background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
-    .tag--mid { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3); }
-    .tag--low { background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+    .tag--high { background: var(--high-bg); color: var(--high-fg); border-color: var(--high-line); }
+    .tag--mid { background: var(--mid-bg); color: var(--mid-fg); border-color: var(--mid-line); }
+    .tag--low { background: var(--low-bg); color: var(--low-fg); border-color: var(--low-line); }
 
     /* ------------------------------------------------------------------ attribute table */
     .table-wrap {
@@ -1059,7 +1140,120 @@
     #status-job[data-state="done"] { color: var(--ok); font-weight: 600; }
     #status-job[data-state="error"] { color: var(--bad); font-weight: 600; }
 
+    /* ------------------------------------------------------------------ wipe dialog */
+    /* A native dialog: focus moves in, Escape closes, and nothing behind it is reachable
+       while it is open -- which is the behaviour a delete-everything prompt needs, without
+       shipping a focus trap to reinvent. */
+    .wipe-dialog {
+      width: min(460px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+    .wipe-dialog::backdrop { background: rgba(2, 6, 14, 0.66); }
+    .wipe-dialog[open] { animation: wipe-in 0.16s ease-out; }
+    @keyframes wipe-in {
+      from { opacity: 0; transform: translateY(6px) scale(0.985); }
+      to { opacity: 1; transform: none; }
+    }
+    .wipe-dialog__head {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .wipe-dialog__head h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-h);
+      letter-spacing: -0.01em;
+    }
+    .wipe-dialog__head p {
+      margin: 5px 0 0;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+    .wipe-dialog__body { padding: 12px 16px 4px; }
+    .wipe-scope {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 12px;
+      font-size: 11.5px;
+    }
+    .wipe-scope__row {
+      display: grid;
+      grid-template-columns: 15px minmax(0, 1fr) auto;
+      align-items: baseline;
+      gap: 8px;
+      padding: 9px 11px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: var(--panel-raised);
+    }
+    .wipe-scope__row i {
+      font-family: var(--font-mono);
+      font-style: normal;
+      font-size: 11px;
+      line-height: 1;
+    }
+    .wipe-scope__row--remove { border-left: 3px solid var(--bad); color: var(--err-fg); }
+    .wipe-scope__row--remove i { color: var(--bad); }
+    .wipe-scope__row--keep { border-left: 3px solid var(--ok); color: var(--muted); }
+    .wipe-scope__row--keep i { color: var(--ok); }
+    .wipe-scope__row b { color: var(--text); font-weight: 500; }
+    .wipe-scope__row--remove b { color: var(--err-strong); }
+    .wipe-scope__size {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--dim);
+      white-space: nowrap;
+    }
+    .wipe-dialog__note {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+    .wipe-dialog__foot {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 14px 16px;
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      background: var(--panel-raised);
+    }
+    .wipe-dialog__foot .spacer { flex: 1 1 auto; }
+    .wipe-confirm {
+      font-weight: 600;
+      color: var(--err-strong);
+      background: var(--err-bg);
+      border-color: var(--err-line);
+    }
+    .wipe-confirm:hover:not(:disabled) {
+      color: var(--err-strong);
+      background: var(--low-bg);
+      border-color: var(--low-line);
+    }
+    .wipe-confirm:disabled { opacity: 0.5; cursor: progress; }
+
     /* ------------------------------------------------------------------ responsive */
+    /* The toolbar scrolls only as a last resort: an invisible scroll hides controls
+       with no affordance, so the chrome sheds the duplicate status chip first and
+       then the secondary labels, keeping every action reachable and named. */
+    @media (max-width: 1320px) {
+      .project-chip { display: none; }
+    }
+
+    @media (max-width: 1180px) {
+      .tool--secondary .tool__label { display: none; }
+      .tool--secondary { padding: 0 9px; }
+    }
+
     @media (max-width: 1180px) {
       .workspace { grid-template-columns: 260px minmax(0, 1fr) 370px; }
       .workspace.is-left-collapsed { grid-template-columns: 0 minmax(0, 1fr) 370px; }
@@ -1069,7 +1263,6 @@
     @media (max-width: 980px) {
       body { overflow: auto; height: auto; }
       .app-bar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
-      .project-chip { display: none; }
       .toolbar { width: 100%; margin-left: 0; }
       .app-bar__right { display: none; }
       .workspace,
@@ -1112,6 +1305,16 @@
       .brand__sub { display: none; }
       .map-chips { gap: 4px; }
       .chip { font-size: 10px; padding: 4px 8px; }
+      /* Below this width the panels are stacked in the page itself, so collapsing them is
+         not a state worth a button -- and without dropping these the theme switch would
+         fall off the end of the toolbar. */
+      #btn-toggle-left-bar, #btn-toggle-right-bar { display: none; }
+      .toolbar { gap: 4px; }
+      /* Clear data is the eighth control, which pushed the theme switch past the right
+         edge. A horizontal scroll with the bar hidden leaves controls unreachable with no
+         affordance, so the toolbar wraps onto a second row instead. */
+      .toolbar { flex-wrap: wrap; overflow-x: visible; row-gap: 6px; }
+      .tool-divider { display: none; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1143,27 +1346,31 @@
     <div class="toolbar" role="toolbar" aria-label="Workspace actions">
       <button type="button" class="tool tool--primary" id="btn-run-toolbar">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-        Run survey
+        <span class="tool__label">Run survey</span>
       </button>
-      <button type="button" class="tool" id="btn-reset">
+      <button type="button" class="tool tool--secondary" id="btn-reset">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
-        Reset view
+        <span class="tool__label">Reset view</span>
       </button>
-      <button type="button" class="tool" id="btn-refresh">
+      <button type="button" class="tool tool--secondary" id="btn-refresh">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
-        Reload results
+        <span class="tool__label">Reload results</span>
       </button>
-      <a class="tool" href="https://www.sitesurveyor.tech" target="_blank" rel="noopener" title="Open SiteSurveyor Mother Platform">
+      <button type="button" class="tool tool--secondary tool--danger" id="btn-wipe" title="Clear all processed data" aria-label="Clear all processed data">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6"/><path d="M18.5 6l-1 13.5a2 2 0 0 1-2 1.5h-7a2 2 0 0 1-2-1.5L5.5 6"/><path d="M10 11v5M14 11v5"/></svg>
+        <span class="tool__label">Clear data</span>
+      </button>
+      <a class="tool tool--secondary" href="https://www.sitesurveyor.tech" target="_blank" rel="noopener" title="Open SiteSurveyor Mother Platform">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        Platform ↗
+        <span class="tool__label">Platform</span>
       </a>
-      <a class="tool tool--ghost" href="/docs" target="_blank" rel="noopener">
+      <a class="tool tool--ghost tool--secondary" href="/docs" target="_blank" rel="noopener" title="REST and MCP API reference">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5V6a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M8 8h8"/></svg>
-        API
+        <span class="tool__label">API</span>
       </a>
-      <a class="tool tool--ghost" href="/api/report" target="_blank" rel="noopener">
+      <a class="tool tool--ghost tool--secondary" href="/api/report" target="_blank" rel="noopener" title="Executive dossier for the latest survey">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-        Dossier
+        <span class="tool__label">Dossier</span>
       </a>
       <div class="tool-divider" aria-hidden="true"></div>
       <button type="button" class="tool tool--icon" id="btn-toggle-left-bar" title="Toggle Contents (left panel)" aria-label="Toggle contents panel" aria-expanded="true">
@@ -1172,7 +1379,7 @@
       <button type="button" class="tool tool--icon" id="btn-toggle-right-bar" title="Toggle Analysis (right panel)" aria-label="Toggle analysis panel" aria-expanded="true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
       </button>
-      <button type="button" class="tool tool--icon" id="btn-theme" title="Toggle dark/light theme" aria-label="Toggle theme">
+      <button type="button" class="tool tool--icon" id="btn-theme" title="Switch to light theme" aria-label="Switch to light theme">
         <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
         <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
@@ -1293,6 +1500,8 @@
               <input class="input input--mono" type="number" step="0.00001" min="-180" max="180" inputmode="decimal" id="lon" value="29.84598">
             </div>
           </div>
+
+          <p class="note note--warn" id="coverage-note" role="status" aria-live="polite" hidden></p>
 
           <div class="field">
             <label class="field__label" for="client">Client / property</label>
@@ -1446,6 +1655,39 @@
     <span>Relative percentile scores · screening only</span>
   </footer>
 
+  <!-- ============================================================ wipe dialog -->
+  <dialog class="wipe-dialog" id="wipe-dialog" aria-labelledby="wipe-title" aria-describedby="wipe-desc">
+    <div class="wipe-dialog__head">
+      <h2 id="wipe-title">Clear processed data?</h2>
+      <p id="wipe-desc">Deletes every survey deliverable and job record this instance holds. Nothing is recovered.</p>
+    </div>
+    <div class="wipe-dialog__body">
+      <div class="wipe-scope">
+        <div class="wipe-scope__row wipe-scope__row--remove">
+          <i aria-hidden="true">&minus;</i>
+          <b>Deliverables</b>
+          <span class="wipe-scope__size" id="wipe-outputs">&mdash;</span>
+        </div>
+        <div class="wipe-scope__row wipe-scope__row--remove">
+          <i aria-hidden="true">&minus;</i>
+          <b>Survey job history</b>
+          <span class="wipe-scope__size" id="wipe-jobs">&mdash;</span>
+        </div>
+        <div class="wipe-scope__row wipe-scope__row--keep">
+          <i aria-hidden="true">&#10003;</i>
+          <b>Downloaded satellite imagery</b>
+          <span class="wipe-scope__size" id="wipe-imagery">&mdash;</span>
+        </div>
+      </div>
+      <p class="wipe-dialog__note" id="wipe-note">The report, maps and KMZ exports come back only by running a survey again: a few minutes per site. The imagery cache is kept because it is input, not a result, and re-fetching it from Digital Earth Africa is the slow part.</p>
+    </div>
+    <div class="wipe-dialog__foot">
+      <span class="spacer"></span>
+      <button type="button" class="tool tool--secondary" id="wipe-cancel" autofocus>Cancel</button>
+      <button type="button" class="tool wipe-confirm" id="wipe-confirm" disabled>Delete everything</button>
+    </div>
+  </dialog>
+
   <script>
     (function () {
       'use strict';
@@ -1467,6 +1709,8 @@
       var targetMarker = null;
       var lastTarget = null;
       var busy = false;
+      var runStartedAt = null;
+      var tickTimer = null;
 
       function $(id) { return document.getElementById(id); }
       function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -1478,6 +1722,16 @@
         var v = num(value);
         return v === null ? '—' : v.toFixed(1);
       }
+      function fmtBytes(value) {
+        var n = num(value);
+        if (n === null || n < 0) { return '0 B'; }
+        if (n < 1024) { return n + ' B'; }
+        var mb = n / 1048576;
+        if (mb < 1024) { return (mb >= 100 ? String(Math.round(mb)) : mb.toFixed(1)) + ' MB'; }
+        var gb = mb / 1024;
+        return (gb >= 10 ? String(Math.round(gb)) : gb.toFixed(1)) + ' GB';
+      }
+
       function fmtKm(value) {
         var v = num(value);
         return v === null ? '—' : v.toFixed(2);
@@ -1487,22 +1741,77 @@
       }
 
       /* -------------------------------------------------------------- theme */
+      var THEME_META = {
+        dark: { color: '#090d16', other: 'light' },
+        light: { color: '#f8fafc', other: 'dark' }
+      };
+
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) { meta.setAttribute('content', THEME_META[theme].color); }
+        var btn = $('btn-theme');
+        if (btn) {
+          var label = 'Switch to ' + THEME_META[theme].other + ' theme';
+          btn.setAttribute('aria-label', label);
+          btn.title = label;
+        }
+      }
+
       function initTheme() {
         var THEME_KEY = 'sitesurveyor-theme';
         var stored = null;
         try { stored = localStorage.getItem(THEME_KEY); } catch (e) {}
-        var theme = stored === 'light' || stored === 'dark' ? stored : 'dark';
-        document.documentElement.setAttribute('data-theme', theme);
+        applyTheme(stored === 'light' || stored === 'dark' ? stored : 'dark');
 
         var btn = $('btn-theme');
         if (btn) {
           btn.addEventListener('click', function () {
             var cur = document.documentElement.getAttribute('data-theme') || 'dark';
             var next = cur === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
+            applyTheme(next);
             try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
           });
         }
+      }
+
+      /* -------------------------------------------------------------- geo maths */
+      function crsFor(lat, lon) {
+        var zone = Math.floor((lon + 180) / 6) + 1;
+        var south = lat < 0;
+        return { label: zone + (south ? 'S' : 'N'), crs: 'EPSG:' + ((south ? 32700 : 32600) + zone) };
+      }
+
+      function outsideCoverage(lat, lon) {
+        return lat < COVERAGE.latMin || lat > COVERAGE.latMax ||
+               lon < COVERAGE.lonMin || lon > COVERAGE.lonMax;
+      }
+
+      function applyCrs(lat, lon) {
+        var c = crsFor(lat, lon);
+        $('banner-crs').textContent = 'UTM ' + c.label + ' · ' + c.crs;
+        $('snap-crs').textContent = c.crs;
+        $('status-crs').textContent = c.crs;
+      }
+
+      /* The pin can be dropped anywhere on the world, but only the DE Africa envelope
+         has imagery behind it. Saying so at the moment of the pick beats failing on submit. */
+      function updateCoverageNote(lat, lon) {
+        var note = $('coverage-note');
+        if (!outsideCoverage(lat, lon)) {
+          note.hidden = true;
+          note.textContent = '';
+          return false;
+        }
+        note.hidden = false;
+        note.textContent = '';
+        var lead = document.createElement('strong');
+        lead.textContent = 'Outside satellite coverage. ';
+        note.appendChild(lead);
+        note.appendChild(document.createTextNode(
+          'Digital Earth Africa serves roughly 30\u00b0W\u201366\u00b0E and 56\u00b0S\u201341\u00b0N. ' +
+          'A survey here would screen empty rasters, so it cannot run.'));
+        return true;
       }
 
       /* -------------------------------------------------------------- networking */
@@ -1586,6 +1895,8 @@
         box.textContent = '';
       }
 
+      var lastPct = 0, lastStage = '';
+
       function setBusy(value) {
         busy = value;
         var btn = $('btn-run');
@@ -1594,28 +1905,52 @@
         btn.disabled = value;
         btn.setAttribute('aria-busy', value ? 'true' : 'false');
         $('btn-run-toolbar').disabled = value;
+        $('btn-refresh').disabled = value;
+        /* Deleting files a survey is still writing leaves half a result on disk, and the
+           server refuses it too. Taking the button away says so before the click. */
+        $('btn-wipe').disabled = value;
+
+        /* A survey reads the coordinate at submit time. Leaving the form live while it
+           runs lets the page end up showing one site's answers beside another's inputs. */
+        Array.prototype.forEach.call(
+          document.querySelectorAll('#survey-form input, #survey-form select'),
+          function (el) { el.disabled = value; }
+        );
+
         label.textContent = value ? 'Screening in progress…' : 'Run screening survey';
         icon.textContent = '';
         if (value) {
           var spinner = document.createElement('span');
           spinner.className = 'spinner';
           icon.appendChild(spinner);
+          runStartedAt = Date.now();
+          tickTimer = setInterval(function () { updateProgress(lastPct, lastStage); }, 1000);
         } else {
+          runStartedAt = null;
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
           icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
         }
       }
 
+      function elapsedLabel() {
+        if (!runStartedAt) { return ''; }
+        var s = Math.round((Date.now() - runStartedAt) / 1000);
+        return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      }
+
       function updateProgress(percent, stage) {
         var pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+        lastPct = pct;
+        lastStage = stage || 'Working';
         $('progress').hidden = false;
         $('progress-bar').style.width = pct + '%';
         $('progress').setAttribute('aria-valuenow', String(pct));
         var el = $('progress-stage');
         el.textContent = '';
         var label = document.createElement('span');
-        label.textContent = stage || 'Working';
+        label.textContent = lastStage;
         var value = document.createElement('b');
-        value.textContent = pct + '%';
+        value.textContent = pct + '%' + (runStartedAt ? ' · ' + elapsedLabel() : '');
         el.appendChild(label);
         el.appendChild(value);
       }
@@ -1624,6 +1959,7 @@
         $('progress').hidden = true;
         $('progress-bar').style.width = '0%';
         $('progress').setAttribute('aria-valuenow', '0');
+        $('progress-stage').textContent = '';
       }
 
       /* -------------------------------------------------------------- indicators */
@@ -1646,6 +1982,9 @@
         var tag = tagFor(v);
         var tagEl = $('badge-' + key);
         tagEl.textContent = (serverClass && String(serverClass)) || tag.text;
+        /* The engine's own class names run past one pill, so the pill truncates and the
+           full wording stays available on hover and long-press. */
+        tagEl.title = tagEl.textContent;
         tagEl.className = 'tag' + (tag.cls ? ' ' + tag.cls : '');
         $('meter-' + key).style.width = v === null ? '0%' : Math.max(3, Math.min(100, v)) + '%';
       }
@@ -1680,6 +2019,7 @@
 
         targetMarker = L.marker([INITIAL.lat, INITIAL.lon], {
           draggable: true,
+          icon: targetIcon(INITIAL.lat, INITIAL.lon),
           title: 'Target site',
           alt: 'Target site marker'
         }).addTo(map);
@@ -1699,7 +2039,7 @@
         map.on('mousemove', function (event) {
           $('status-coords').textContent = dms(event.latlng.lat, 'N', 'S') + '  ' + dms(event.latlng.lng, 'E', 'W');
         });
-        map.on('mouseout', function () { $('status-coords').textContent = '—'; });
+        map.on('mouseout', showTargetCoords);
         map.on('zoomend moveend', updateScale);
         updateScale();
       }
@@ -1724,16 +2064,70 @@
         return node;
       }
 
-      function moveTarget(lat, lon) {
-        $('lat').value = lat.toFixed(5);
-        $('lon').value = lon.toFixed(5);
+      /* Touch users never get a mousemove, so the readout falls back to the target
+         rather than sitting at an em dash all session. */
+      function showTargetCoords() {
+        var lat = num(Number($('lat').value));
+        var lon = num(Number($('lon').value));
+        $('status-coords').textContent = (lat === null || lon === null)
+          ? '—'
+          : dms(lat, 'N', 'S') + '  ' + dms(lon, 'E', 'W');
+      }
+
+      /* One place keeps the pin, the readouts and the coverage advisory in step with
+         whatever the target now is, whether it moved by map click, drag or typing. */
+      function syncTarget(lat, lon, keepInputs) {
+        if (!keepInputs) {
+          $('lat').value = lat.toFixed(5);
+          $('lon').value = lon.toFixed(5);
+        }
         if (targetMarker) {
           targetMarker.setLatLng([lat, lon]);
-          targetMarker.bindPopup(targetPopup(lat, lon)).openPopup();
+          targetMarker.setIcon(targetIcon(lat, lon));
         }
         $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
         $('snap-target').textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+        applyCrs(lat, lon);
+        updateCoverageNote(lat, lon);
+        showTargetCoords();
+      }
+
+      function moveTarget(lat, lon) {
+        syncTarget(lat, lon, false);
+        if (targetMarker) {
+          targetMarker.bindPopup(targetPopup(lat, lon)).openPopup();
+        }
         $('map-hint').classList.add('is-hidden');
+      }
+
+      /* Typing a coordinate is the same act as dropping the pin, so it drives the same
+         readouts. A half-finished value is ignored rather than yanking the pin to 0,0 --
+         an empty number input parses to 0, which is a real place in the Gulf of Guinea. */
+      function wireTargetInputs() {
+        function onEdit() {
+          var lat = Number($('lat').value);
+          var lon = Number($('lon').value);
+          if (!Number.isFinite(lat) || lat < -90 || lat > 90) { return; }
+          if (!Number.isFinite(lon) || lon < -180 || lon > 180) { return; }
+          syncTarget(lat, lon, true);
+          if (map) { map.panTo([lat, lon]); }
+        }
+        ['lat', 'lon'].forEach(function (id) {
+          $(id).addEventListener('change', onEdit);
+        });
+      }
+
+      function targetIcon(lat, lon) {
+        var c = outsideCoverage(lat, lon) ? '#f59e0b' : '#D14141';
+        var svg = '<svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true">' +
+          '<circle cx="15" cy="15" r="13" fill="' + c + '" fill-opacity="0.16"/>' +
+          '<circle cx="15" cy="15" r="8.4" stroke="' + c + '" stroke-width="2.3"/>' +
+          '<circle cx="15" cy="15" r="2.7" fill="' + c + '" stroke="#ffffff" stroke-width="1.3"/>' +
+          '<path d="M15 1.6v4.2M15 24.2v4.2M1.6 15h4.2M24.2 15h4.2" stroke="' + c + '" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>';
+        return L.divIcon({
+          className: 'target-pin', html: svg, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -14]
+        });
       }
 
       function pinIcon(color, text) {
@@ -1751,18 +2145,19 @@
         if (lat === null || lon === null) { return; }
         lastTarget = target;
 
-        $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
-        $('snap-target').textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+        /* The form must describe the results on screen: a preloaded survey for site A
+           cannot leave the default coordinate for site B sitting under "Run Survey". */
+        syncTarget(lat, lon, false);
 
+        /* The engine reports the CRS it actually warped rasters into, which beats a
+           client-side UTM guess whenever it is present. */
         if (target.crs) {
-          var epsg = String(target.crs).replace('EPSG:', '');
           $('banner-crs').textContent = 'UTM ' + (target.utm_zone || '') + ' · ' + target.crs;
-          $('snap-crs').textContent = 'EPSG:' + epsg;
-          $('status-crs').textContent = 'EPSG:' + epsg;
+          $('snap-crs').textContent = target.crs;
+          $('status-crs').textContent = target.crs;
         }
 
         if (!map) { return; }
-        if (targetMarker) { targetMarker.setLatLng([lat, lon]); }
 
         var bbox = Array.isArray(target.bbox_wgs84) ? target.bbox_wgs84 : null;
         if (bbox && bbox.length === 4) {
@@ -1811,7 +2206,7 @@
         return out;
       }
 
-      function renderCandidates(list) {
+      function renderCandidates(list, emptyText) {
         var body = $('candidates-body');
         body.textContent = '';
 
@@ -1823,7 +2218,8 @@
           emptyRow.className = 'empty-row';
           var emptyCell = document.createElement('td');
           emptyCell.colSpan = 6;
-          emptyCell.textContent = 'No candidates were returned for this survey. Open the dossier for full maps and caveats.';
+          emptyCell.textContent = emptyText ||
+            'No candidates were returned for this survey. Open the dossier for full maps and caveats.';
           emptyRow.appendChild(emptyCell);
           body.appendChild(emptyRow);
           return;
@@ -1915,6 +2311,7 @@
       function applyDownloads(urls) {
         if (!urls) { return; }
         var links = document.querySelectorAll('[data-deliverable]');
+        var total = links.length;
         Array.prototype.forEach.call(links, function (link) {
           var key = link.getAttribute('data-deliverable');
           if (urls[key]) {
@@ -1929,9 +2326,14 @@
         });
 
         var disabled = document.querySelectorAll('[data-deliverable][aria-disabled="true"]').length;
-        $('downloads-note').textContent = disabled
-          ? 'Only the files this survey produced are enabled; greyed-out exports were not generated.'
-          : 'All exports are ready for download.';
+        /* The wording has to fit the state, not assume a survey ran: on a cleared or fresh
+           instance every link is dead because nothing exists, not because one produced a
+           subset. */
+        $('downloads-note').textContent = !disabled
+          ? 'All exports are ready for download.'
+          : (disabled === total
+              ? 'No exports exist on this instance yet; a completed survey writes them.'
+              : 'Only the files this survey produced are enabled; greyed-out exports were not generated.');
       }
 
       /* -------------------------------------------------------------- results */
@@ -2023,13 +2425,16 @@
 
         if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
           showError('Check the latitude', 'Latitude must be a number between −90 and 90.');
+          $('lat').focus();
           return;
         }
         if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
           showError('Check the longitude', 'Longitude must be a number between −180 and 180.');
+          $('lon').focus();
           return;
         }
-        if (lat < COVERAGE.latMin || lat > COVERAGE.latMax || lon < COVERAGE.lonMin || lon > COVERAGE.lonMax) {
+        updateCoverageNote(lat, lon);
+        if (outsideCoverage(lat, lon)) {
           showError('Outside satellite coverage',
             'Digital Earth Africa serves roughly 30°W–66°E and 56°S–41°N. This coordinate falls outside it, so there is no imagery to screen.');
           return;
@@ -2039,11 +2444,18 @@
           .map(function (cat) { return cat.key; })
           .filter(function (key) { return $('cat-' + key).checked; });
 
+        if (!categories.length) {
+          showError('Choose at least one category',
+            'Every screening category is unticked, so there is nothing to run.',
+            'Tick Water, Minerals, Soil or Hazard — or all four for the full dossier.');
+          return;
+        }
+
         var payload = {
           latitude: lat,
           longitude: lon,
           half_deg: Number($('half-deg').value),
-          categories: categories.length ? categories : ['all'],
+          categories: categories,
           client_name: $('client').value.trim() || 'Client',
           address: $('address').value.trim(),
           async_mode: true
@@ -2094,15 +2506,40 @@
         }
       }
 
-      async function preloadLastSurvey() {
+      async function refreshDeliverables() {
         try {
-          var dossier = await fetchJson('/api/dossier', {}, 20000);
+          var data = await fetchJson('/api/deliverables', {}, 15000);
+          applyDownloads(data.download_urls || {});
+        } catch (e) {
+          $('downloads-note').textContent =
+            'Download availability could not be confirmed. Files that were never produced return an error when opened.';
+        }
+      }
+
+      async function preloadLastSurvey(explicit) {
+        if (explicit) {
+          clearError();
+          $('btn-refresh').disabled = true;
+          setJobStatus('running', 'Reloading results');
+        }
+        try {
+          var dossier;
+          try {
+            dossier = await fetchJson('/api/dossier', {}, 20000);
+          } catch (missing) {
+            /* An instance that has never surveyed anything answers 404 rather than
+               compiling an empty dossier about a site nobody picked. That is the blank
+               slate, not a failure. */
+            if (missing.code !== 'no_survey') { throw missing; }
+            dossier = { category_status: {} };
+          }
           var statuses = dossier.category_status || {};
           var anyLoaded = Object.keys(statuses).some(function (key) { return statuses[key] === 'loaded'; });
           if (!anyLoaded) {
             $('results-note').hidden = false;
             $('results-note').textContent = 'No completed survey yet on this instance. Pick a coordinate and run one.';
             $('snap-source').textContent = 'No survey yet';
+            if (explicit) { setJobStatus('idle', 'No saved survey'); }
             return;
           }
           renderResults(dossier, { source: 'dossier' });
@@ -2112,9 +2549,133 @@
               longitude: dossier.target_coordinates.longitude
             });
           }
+          if (explicit) { setJobStatus('done', 'Saved survey loaded'); }
         } catch (e) {
-          // A previous survey is optional; the workspace works without one.
+          /* On arrival a missing previous survey is normal, so stay quiet. When the
+             visitor asked for it, the failure is theirs to see. */
+          if (!explicit) { return; }
+          showError('Could not reload results', e.message, e.hint, e.requestId);
+          setJobStatus('error', 'Reload failed');
+        } finally {
+          if (explicit) { $('btn-refresh').disabled = false; }
         }
+      }
+
+      /* --------------------------------------------------------- clear data */
+      var wipe = { phrase: null, running: false };
+
+      function scopeCount(files, bytes, noun) {
+        if (!files) { return 'empty'; }
+        return files + ' ' + noun + (files === 1 ? '' : 's') + ' · ' + fmtBytes(bytes);
+      }
+
+      function clearWorkspace() {
+        ['water', 'minerals', 'soil', 'safety'].forEach(function (key) { setIndicator(key, null); });
+        countIndicators([null, null, null, null]);
+        renderCandidates([], 'Nothing on record. Run a survey and its ranked candidates appear here.');
+        lastTarget = null;
+        applyDownloads({});
+        var note = $('results-note');
+        note.hidden = false;
+        note.textContent = 'Processed data was cleared from this instance. Pick a coordinate and run a survey to build new results.';
+        $('snap-source').textContent = 'No survey yet';
+        $('snap-basis').textContent = 'AOI percentile';
+        clearError();
+      }
+
+      async function openWipeDialog() {
+        var dialog = $('wipe-dialog');
+        var confirmBtn = $('wipe-confirm');
+        var outputEl = $('wipe-outputs');
+        var jobsEl = $('wipe-jobs');
+        var imageryEl = $('wipe-imagery');
+        var noteEl = $('wipe-note');
+
+        /* Nothing is confirmable until the workspace has been measured: the count in
+           front of the visitor is the consent. */
+        wipe.phrase = null;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Delete everything';
+        outputEl.textContent = 'measuring…';
+        jobsEl.textContent = 'measuring…';
+        imageryEl.textContent = 'measuring…';
+        dialog.showModal();
+
+        try {
+          var data = await fetchJson('/api/storage', {}, 15000);
+          /* The visitor may have hit Escape while that was in flight; filling a closed
+             dialog would leave stale counts for the next open. */
+          if (!dialog.open) { return; }
+          var outputs = data.outputs || {};
+          var jobs = data.jobs || {};
+          var imagery = data.imagery || {};
+          outputEl.textContent = scopeCount(outputs.files, outputs.bytes, 'file');
+          jobsEl.textContent = scopeCount(jobs.files, jobs.bytes, 'record');
+          imageryEl.textContent = imagery.files
+            ? (imagery.sites || 0) + ' site' + (imagery.sites === 1 ? '' : 's') + ' · ' + fmtBytes(imagery.bytes)
+            : 'empty';
+          if (!outputs.files && !jobs.files) {
+            noteEl.textContent = 'There is nothing to clear: no deliverables and no job records on this instance.';
+            return;
+          }
+          wipe.phrase = data.confirm_phrase || null;
+          confirmBtn.disabled = !wipe.phrase;
+          if (!wipe.phrase) {
+            noteEl.textContent = 'The server did not return a confirmation phrase, so this build cannot clear the workspace. Nothing has been deleted.';
+          }
+        } catch (e) {
+          if (!dialog.open) { return; }
+          outputEl.textContent = 'unknown';
+          jobsEl.textContent = 'unknown';
+          imageryEl.textContent = 'unknown';
+          noteEl.textContent = 'Could not read the workspace (' + e.message + '), so deleting is disabled. Nothing has been removed yet.';
+        }
+      }
+
+      async function runWipe() {
+        if (!wipe.phrase || wipe.running) { return; }
+        var dialog = $('wipe-dialog');
+        var confirmBtn = $('wipe-confirm');
+        wipe.running = true;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Deleting…';
+        try {
+          var res = await fetchJson('/api/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirm: wipe.phrase })
+          }, 120000);
+          var cleared = res.cleared || {};
+          var files = (cleared.outputs ? cleared.outputs.files || 0 : 0) + (cleared.jobs ? cleared.jobs.files || 0 : 0);
+          var bytes = (cleared.outputs ? cleared.outputs.bytes || 0 : 0) + (cleared.jobs ? cleared.jobs.bytes || 0 : 0);
+          clearWorkspace();
+          setEngine('ready', 'Engine ready');
+          setJobStatus('idle', files ? 'Cleared ' + files + ' file(s)' : 'Workspace clear');
+          /* Re-check availability from the server rather than assuming the panel is right. */
+          refreshDeliverables();
+          var failed = res.failed || [];
+          if (failed.length) {
+            showError(
+              'Cleared only partly',
+              files + ' file(s) · ' + fmtBytes(bytes) + ' were removed, but ' + failed.length +
+                ' could not be deleted.',
+              'Close anything still reading them — an open report tab or PDF viewer — then clear again. ' +
+                'The files listed are untouched: ' + failed.join('; ')
+            );
+          }
+        } catch (e) {
+          showError('Could not clear data', e.message, e.hint, e.requestId);
+          setJobStatus('error', 'Clear failed');
+        } finally {
+          dialog.close();
+          wipe.running = false;
+        }
+      }
+
+      function wireWipe() {
+        $('btn-wipe').addEventListener('click', openWipeDialog);
+        $('wipe-cancel').addEventListener('click', function () { $('wipe-dialog').close(); });
+        $('wipe-confirm').addEventListener('click', runWipe);
       }
 
       function wireLayers() {
@@ -2229,12 +2790,17 @@
           }
         });
         $('btn-reset').addEventListener('click', resetView);
-        $('btn-refresh').addEventListener('click', preloadLastSurvey);
+        $('btn-refresh').addEventListener('click', function () { preloadLastSurvey(true); });
+        wireWipe();
+        wireTargetInputs();
 
         $('snap-target').textContent = INITIAL.lat.toFixed(4) + ', ' + INITIAL.lon.toFixed(4);
+        applyCrs(INITIAL.lat, INITIAL.lon);
+        updateCoverageNote(INITIAL.lat, INITIAL.lon);
         setJobStatus('idle', 'Idle');
 
         preloadLastSurvey();
+        refreshDeliverables();
       }
 
       boot();

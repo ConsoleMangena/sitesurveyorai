@@ -52,6 +52,33 @@ def _img_to_base64_src(path: Path) -> tuple[str | None, str]:
     return f"data:image/png;base64,{encoded}", "embedded"
 
 
+def _survey_identity(sections: list[dict | None]) -> dict | None:
+    """The site and client the loaded category files were actually produced for.
+
+    Every summary carries the coordinates it was generated from, so the dossier can name
+    the ground it is reporting on instead of trusting whichever AOI the process happens
+    to be holding right now.
+    """
+    for data in sections:
+        if not isinstance(data, dict):
+            continue
+        coords = data.get("target_coordinates")
+        if isinstance(coords, dict):
+            lat, lon = coords.get("latitude"), coords.get("longitude")
+        else:
+            lat, lon = data.get("target_lat"), data.get("target_lon")
+        numeric = isinstance(lat, (int, float)) and not isinstance(lat, bool)
+        numeric = numeric and isinstance(lon, (int, float)) and not isinstance(lon, bool)
+        if numeric:
+            return {
+                "latitude": float(lat),
+                "longitude": float(lon),
+                "client": data.get("client") or None,
+                "address": data.get("address") or None,
+            }
+    return None
+
+
 def generate_site_dossier(
     target_lat: float | None = None,
     target_lon: float | None = None,
@@ -73,16 +100,29 @@ def generate_site_dossier(
     soil_data, soil_status = _load_category(cfg.OUT / "soil_summary.json")
     hazard_data, hazard_status = _load_category(cfg.OUT / "hazard_summary.json")
 
+    # A restarted engine holds its compiled default AOI while the survey files on disk
+    # still belong to the previous client. Reporting the surveyed site rather than the
+    # live config is what stops one client's coordinates heading another client's numbers.
+    identity = _survey_identity([water_data, minerals_data, soil_data, hazard_data])
+    if identity:
+        if (round(identity["latitude"], 5), round(identity["longitude"], 5)) != (
+                round(cfg.TARGET_LAT, 5), round(cfg.TARGET_LON, 5)):
+            print(f"  [!] Survey files belong to ({identity['latitude']:.5f}, {identity['longitude']:.5f})"
+                  f" [{identity['client'] or 'unnamed'}], not the live config target.")
+    else:
+        identity = {"latitude": cfg.TARGET_LAT, "longitude": cfg.TARGET_LON,
+                    "client": cfg.CLIENT, "address": cfg.CLIENT_ADDRESS}
+
     # 1. Build Master JSON Dossier
     dossier = {
         "title": "SiteSurveyor AI Executive Site Intelligence Dossier",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "client": cfg.CLIENT,
-        "address": cfg.CLIENT_ADDRESS,
+        "client": identity["client"] or cfg.CLIENT,
+        "address": identity["address"] or cfg.CLIENT_ADDRESS,
         "analyst_organization": cfg.ANALYST,
         "target_coordinates": {
-            "latitude": cfg.TARGET_LAT,
-            "longitude": cfg.TARGET_LON,
+            "latitude": identity["latitude"],
+            "longitude": identity["longitude"],
         },
         "category_status": {
             "groundwater": water_status,
@@ -194,6 +234,63 @@ def _build_html_report(dossier: dict) -> str:
         survive that rather than crashing on None.get for a data-poor scene."""
         return section.get(key) or {}
 
+    def number(value):
+        """A real measurement, or None.
+
+        ``dict.get(key, "N/A")`` still returns None when the key exists holding a null,
+        and a survey writes exactly that when a category ran but scored nothing at the
+        target cell. Left raw, the client document prints the word "None" as a score.
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    def score(value):
+        v = number(value)
+        if v is None:
+            return "N/A"
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+
+    def out_of(value):
+        """A score written as "62.4/100", or N/A -- never the fragment "N/A/100"."""
+        v = number(value)
+        return "N/A" if v is None else f"{score(v)}/100"
+
+    def distance(value):
+        v = number(value)
+        return "N/A" if v is None else f"{v:.2f} km"
+
+    def coordinate(value, digits=5):
+        v = number(value)
+        return "N/A" if v is None else f"{v:.{digits}f}"
+
+    def label(value, fallback="Not classified"):
+        return _escape(str(value)) if value else fallback
+
+    def band(value, lower_is_better=False):
+        """One colour per score band, for both the headline number and its badge.
+
+        The ramp is shared by the 38px headline score and the 11px badge under it. A
+        mid-tone like #10b981 clears neither 4.5:1 as text on white nor 4.5:1 with white
+        type inside it, so every step here is dark enough to do both jobs at once.
+        """
+        v = number(value)
+        if v is None:
+            return "#475569"
+        if lower_is_better:
+            if v <= 30:
+                return "#047857"
+            if v <= 50:
+                return "#92400e"
+            return "#b91c1c"
+        if v >= 75:
+            return "#047857"
+        if v >= 55:
+            return "#92400e"
+        if v >= 40:
+            return "#9a3412"
+        return "#b91c1c"
+
     sc = dossier.get("executive_scorecard", {})
     gw = sc.get("groundwater", {})
     minerals = sc.get("minerals", {})
@@ -203,11 +300,21 @@ def _build_html_report(dossier: dict) -> str:
     # Client, address and coordinates are caller-supplied and this document is served
     # same-origin, so they are escaped before interpolation. Unescaped, a client name
     # containing a script tag executed for the next visitor of /api/report.
-    client_name = _escape(cfg.CLIENT or "Client")
-    client_address = _escape(cfg.CLIENT_ADDRESS or "")
-    latitude_label = f"{abs(cfg.TARGET_LAT):.5f}&deg; {'N' if cfg.TARGET_LAT >= 0 else 'S'}"
-    longitude_label = f"{abs(cfg.TARGET_LON):.5f}&deg; {'E' if cfg.TARGET_LON >= 0 else 'W'}"
-    zone_label = f"{cfg.UTM_ZONE}{'N' if cfg.TARGET_LAT >= 0 else 'S'}"
+    # They come from the dossier rather than cfg: the module globals may belong to a
+    # different survey than the files these numbers were read from.
+    client_name = _escape(dossier.get("client") or cfg.CLIENT or "Client")
+    client_address = _escape(dossier.get("address") or cfg.CLIENT_ADDRESS or "")
+    property_line = f'<div>Property: <strong>{client_address}</strong></div>' if client_address else ""
+    coords = dossier.get("target_coordinates") or {}
+    site_lat = number(coords.get("latitude"))
+    site_lon = number(coords.get("longitude"))
+    if site_lat is None or site_lon is None:
+        site_lat, site_lon = cfg.TARGET_LAT, cfg.TARGET_LON
+    latitude_label = f"{abs(site_lat):.5f}&deg; {'N' if site_lat >= 0 else 'S'}"
+    longitude_label = f"{abs(site_lon):.5f}&deg; {'E' if site_lon >= 0 else 'W'}"
+    utm_zone = int((site_lon + 180.0) // 6.0) + 1
+    epsg = (32700 + utm_zone) if site_lat < 0 else (32600 + utm_zone)
+    zone_label = f"{utm_zone}{'N' if site_lat >= 0 else 'S'}"
 
     statuses = dossier.get("category_status", {}) or {}
     unfinished = [name.replace("_", " ") for name, status in statuses.items() if status != "loaded"]
@@ -229,12 +336,24 @@ def _build_html_report(dossier: dict) -> str:
     # A panel that cannot be embedded is stated as unavailable with its reason --
     # a silently missing map reads as "no map was made" to the client.
     map_specs = [
-        ("Category 1: Groundwater Potential Zones (GWPZ)", "groundwater_potential_map.png", "Groundwater Map"),
-        ("Groundwater Local Siting Zoom (5x5 km)", "site_zoom_map.png", "Groundwater Zoom"),
-        ("Category 2: Mineral Prospectivity & Shear Zones", "mineral_prospectivity_map.png", "Minerals Map"),
-        ("Category 3: Soil & Land Capability Zoning", "soil_capability_map.png", "Soil Map"),
-        ("Category 5: Natural Hazard & Risk Zoning", "hazard_risk_map.png", "Hazard Map"),
-        ("Site Safety & Hazard Zoom (5x5 km)", "site_hazard_zoom.png", "Hazard Zoom"),
+        ("Category 1: Groundwater Potential Zones (GWPZ)", "groundwater_potential_map.png",
+         "Map of the survey area shaded by groundwater potential class, with the client target "
+         "starred and each ranked drilling candidate labelled by rank."),
+        ("Groundwater Local Siting Zoom (5x5 km)", "site_zoom_map.png",
+         "Five by five kilometre zoom around the client property, plotting candidate borehole "
+         "positions as an offset from the target in kilometres."),
+        ("Category 2: Mineral Prospectivity & Shear Zones", "mineral_prospectivity_map.png",
+         "Map of the survey area shaded by gold and shear-system prospectivity class, with the "
+         "client target starred and ranked exploration targets labelled by rank."),
+        ("Category 3: Soil & Land Capability Zoning", "soil_capability_map.png",
+         "Map of the survey area shaded by soil and land capability class, with the client target "
+         "starred and ranked candidate zones labelled by rank."),
+        ("Category 5: Natural Hazard & Risk Zoning", "hazard_risk_map.png",
+         "Map of the survey area shaded by composite natural hazard risk class, with the client "
+         "target starred and the safest ranked build sites labelled by rank."),
+        ("Site Safety & Hazard Zoom (5x5 km)", "site_hazard_zoom.png",
+         "Five by five kilometre zoom around the client property, plotting the safest build sites "
+         "as an offset from the target in kilometres."),
     ]
     map_panels = []
     for map_title, map_file, map_alt in map_specs:
@@ -245,30 +364,54 @@ def _build_html_report(dossier: dict) -> str:
         else:
             map_panels.append(
                 f'<div class="map-box"><h4>{map_title}</h4>'
-                f'<p style="color:#a33; font-size:0.9em;">Map not embedded: {img_note}.</p></div>')
+                f'<p class="map-missing">Map not embedded: {img_note}.</p></div>')
     maps_html = "\n      ".join(map_panels)
 
-    def score_color(val):
-        if val is None:
-            return "#64748b"
-        if val >= 75:
-            return "#10b981"
-        elif val >= 55:
-            return "#f59e0b"
-        elif val >= 40:
-            return "#f97316"
-        else:
-            return "#ef4444"
-
-    def hazard_color(val):
-        if val is None:
-            return "#64748b"
-        if val <= 30:
-            return "#10b981"
-        elif val <= 50:
-            return "#f59e0b"
-        else:
-            return "#ef4444"
+    # Coordinates are generated from the survey output instead of hardcoding each #1 pick.
+    # A client acting on one point has no fallback if that spot is already spoken for, and
+    # a category that ranked nothing must not render a phantom "#1 Candidate" at N/A.
+    # The category tints are darker than the domain hues: the bright cyan and amber used for
+    # borders and badges dissolve to ~2.2:1 as small text on a white page.
+    table_specs = [
+        ("Groundwater Siting", "water", "candidate_sites", "#0369a1", "Candidate",
+         "Vertical Electrical Sounding (VES) resistivity verification"),
+        ("Mineral Exploration", "minerals", "candidate_targets", "#a16207", "Target",
+         "Ground geological mapping &amp; soil geochemical sampling"),
+        ("Soil &amp; Agriculture", "soil_land", "candidate_areas", "#047857", "Zone",
+         "Agronomic soil profile test &amp; pH analysis"),
+        ("Safest Building Site", "hazard_safety", "safest_candidate_sites", "#be123c", "Safe Zone",
+         "Geotechnical soil compaction &amp; foundation investigation"),
+    ]
+    categories = dossier.get("categories", {}) or {}
+    coord_rows = []
+    for name, key, list_key, tint, noun, action in table_specs:
+        ranked = [c for c in ((categories.get(key) or {}).get(list_key) or []) if isinstance(c, dict)][:3]
+        if not ranked:
+            coord_rows.append(
+                f'        <tr>\n'
+                f'          <td><strong style="color:{tint};">{name}</strong></td>\n'
+                f'          <td colspan="5" class="empty-row">No candidate ranked above the screening '
+                f'threshold for this category.</td>\n'
+                f'          <td>{action}</td>\n'
+                f'        </tr>'
+            )
+            continue
+        span = len(ranked)
+        for index, item in enumerate(ranked):
+            cells = []
+            if index == 0:
+                cells.append(f'          <td rowspan="{span}"><strong style="color:{tint};">{name}</strong></td>')
+            rank = number(item.get("rank"))
+            cells.append(f'          <td><span class="mono">{"#" + str(int(rank)) if rank is not None else "Unranked"} {noun}</span></td>')
+            cells.append(f'          <td class="mono">{coordinate(item.get("latitude"))}</td>')
+            cells.append(f'          <td class="mono">{coordinate(item.get("longitude"))}</td>')
+            cells.append(f'          <td class="mono">{distance(item.get("distance_from_target_km"))}</td>')
+            value = item.get("potential_score")
+            cells.append(f'          <td><strong class="mono" style="color: {band(value)};">{out_of(value)}</strong></td>')
+            if index == 0:
+                cells.append(f'          <td rowspan="{span}">{action}</td>')
+            coord_rows.append("        <tr>\n" + "\n".join(cells) + "\n        </tr>")
+    coord_rows_html = "\n".join(coord_rows)
 
     logo_svg_path = Path(__file__).resolve().parent / "static" / "logo.svg"
     logo_data_uri = "/logo.svg"
@@ -283,7 +426,10 @@ def _build_html_report(dossier: dict) -> str:
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>SiteSurveyor AI — Executive Site Intelligence Dossier</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="SiteSurveyor AI executive site intelligence dossier for {client_name}.">
+  <title>{client_name} &mdash; SiteSurveyor AI Site Intelligence Dossier</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -306,6 +452,7 @@ def _build_html_report(dossier: dict) -> str:
       --line-strong: #cbd5e1;
       --text: #0f172a;
       --text-muted: #64748b;
+      --text-quiet: #475569;
       --dim: #94a3b8;
     }}
 
@@ -318,6 +465,7 @@ def _build_html_report(dossier: dict) -> str:
       background-color: var(--bg);
       color: var(--text);
       line-height: 1.6;
+      -webkit-text-size-adjust: 100%;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }}
@@ -347,6 +495,7 @@ def _build_html_report(dossier: dict) -> str:
       display: flex;
       align-items: center;
       gap: 16px;
+      min-width: 0;
     }}
     .brand-mark {{
       width: 48px;
@@ -381,7 +530,7 @@ def _build_html_report(dossier: dict) -> str:
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.8px;
-      color: var(--brand);
+      color: #f87171;
       background: var(--brand-muted);
       border: 1px solid var(--brand-border);
       padding: 3px 8px;
@@ -506,15 +655,21 @@ def _build_html_report(dossier: dict) -> str:
     }}
 
     /* Actionable Table */
-    .target-table {{
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--surface);
-      border-radius: 10px;
-      overflow: hidden;
+    .table-wrap {{
       border: 1px solid var(--line);
+      border-radius: 10px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
       margin-bottom: 35px;
+      /* Seven columns cannot breathe in 390px; a scrollable sheet keeps every
+         coordinate legible instead of crushing them into a wrapped blur. */
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }}
+    .target-table {{
+      width: 100%;
+      min-width: 46rem;
+      border-collapse: collapse;
+      background: var(--surface);
       font-size: 12.5px;
     }}
     .target-table th {{
@@ -527,20 +682,31 @@ def _build_html_report(dossier: dict) -> str:
       letter-spacing: 0.6px;
       text-transform: uppercase;
       border-bottom: 1px solid var(--line);
+      white-space: nowrap;
     }}
     .target-table td {{
       padding: 12px 14px;
       border-top: 1px solid var(--line);
       color: var(--text);
+      vertical-align: top;
     }}
-    .target-table tr:hover {{
-      background: #f8fafc;
+    .target-table td.mono, .target-table td .mono {{
+      white-space: nowrap;
+    }}
+    .target-table tbody tr:first-child td {{
+      border-top: none;
+    }}
+    /* No row hover: the category and its field action are rowspanned across the three
+       candidates under them, so a hovered row would light only part of its own group. */
+    .target-table .empty-row {{
+      color: var(--text-muted);
+      font-style: italic;
     }}
 
     /* Maps Grid */
     .maps-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
       gap: 22px;
       margin-bottom: 35px;
     }}
@@ -564,13 +730,17 @@ def _build_html_report(dossier: dict) -> str:
       border: 1px solid var(--line);
       display: block;
     }}
+    .map-missing {{
+      color: #b91c1c;
+      font-size: 12px;
+      margin: 2px 0;
+    }}
 
     /* Banners & Notes */
     .status-banner {{
       background: #fffbeb;
-      border-left: 4px solid var(--mineral);
       border: 1px solid #fde68a;
-      border-left-width: 4px;
+      border-left: 4px solid var(--mineral);
       border-radius: 6px;
       padding: 14px 18px;
       font-size: 12.5px;
@@ -579,7 +749,7 @@ def _build_html_report(dossier: dict) -> str:
     }}
     .note {{
       font-size: 12px;
-      color: var(--text-muted);
+      color: var(--text-quiet);
       background: #f1f5f9;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -613,6 +783,42 @@ def _build_html_report(dossier: dict) -> str:
       border-top: 1px solid var(--line);
       background: var(--surface);
     }}
+
+    /* The dossier is read on a phone in the field and printed for the file, so both are
+       designed for rather than left to shrink. */
+    @media (max-width: 720px) {{
+      .header {{ padding: 24px 20px; }}
+      .header-inner {{ flex-direction: column; align-items: flex-start; gap: 16px; }}
+      .header-client {{ padding: 10px 14px; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }}
+      .header h1 {{ font-size: 20px; letter-spacing: -0.3px; }}
+      .header .subtitle {{ font-size: 11px; }}
+      .meta-bar {{ padding: 12px 20px; justify-content: flex-start; gap: 10px 22px; }}
+      .meta-item {{ min-width: 0; overflow-wrap: anywhere; }}
+      .container {{ margin: 22px auto; padding: 0 14px; }}
+      .section-title {{ font-size: 16px; margin: 30px 0 14px 0; }}
+      .scorecard-grid, .maps-grid {{ gap: 14px; }}
+      .card, .map-box {{ padding: 16px; }}
+      .footer {{ padding: 22px 14px; }}
+    }}
+
+    @media print {{
+      @page {{ margin: 14mm; }}
+      body {{ background: #ffffff; }}
+      .header, .meta-bar, .card, .map-box, .score-badge, .status-banner,
+      .disclaimer, .note, .table-wrap, .target-table th {{
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }}
+      .card, .map-box, .status-banner, .disclaimer, .attribution, .note {{ break-inside: avoid; }}
+      .section-title {{ break-after: avoid; }}
+      .container {{ max-width: none; margin: 16px 0; padding: 0; }}
+      .header {{ padding: 22px 24px; }}
+      .table-wrap {{ overflow: visible; box-shadow: none; }}
+      .target-table {{ min-width: 0; }}
+      .maps-grid {{ grid-template-columns: 1fr 1fr; }}
+      .map-box img {{ width: auto; max-width: 100%; max-height: 105mm; margin: 0 auto; }}
+      .card, .map-box, .table-wrap {{ box-shadow: none; }}
+    }}
   </style>
 </head>
 <body>
@@ -630,7 +836,7 @@ def _build_html_report(dossier: dict) -> str:
       </div>
       <div class="header-client">
         <div>Client: <strong>{client_name}</strong></div>
-        <div>Property: <strong>{client_address}</strong></div>
+        {property_line}
       </div>
     </div>
   </div>
@@ -638,7 +844,7 @@ def _build_html_report(dossier: dict) -> str:
   <div class="meta-bar">
     <div class="meta-item"><strong>GPS Latitude:</strong> <span>{latitude_label}</span></div>
     <div class="meta-item"><strong>GPS Longitude:</strong> <span>{longitude_label}</span></div>
-    <div class="meta-item"><strong>Datum / CRS:</strong> <span>WGS 84 / UTM {zone_label} (EPSG:{cfg.EPSG})</span></div>
+    <div class="meta-item"><strong>Datum / CRS:</strong> <span>WGS 84 / UTM {zone_label} (EPSG:{epsg})</span></div>
     <div class="meta-item"><strong>Resolution:</strong> <span>30m Multi-Sensor Grid</span></div>
     <div class="meta-item"><strong>Generated:</strong> <span>{dossier.get('generated_at')}</span></div>
   </div>
@@ -659,43 +865,50 @@ def _build_html_report(dossier: dict) -> str:
       <!-- Groundwater -->
       <div class="card card--water">
         <h3>Groundwater Potential</h3>
-        <div class="big-score" style="color: {score_color(gw.get('cell_score'))};">{gw.get('cell_score', 'N/A')}</div>
-        <span class="score-badge" style="background: {score_color(gw.get('cell_score'))};">{gw.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{gw.get('parcel_150m_score', 'N/A')}/100</span> ({gw.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Top Drilling Site:</strong> <span class="mono">{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</span> away</div>
+        <div class="big-score" style="color: {band(gw.get('cell_score'))};">{score(gw.get('cell_score'))}</div>
+        <span class="score-badge" style="background: {band(gw.get('cell_score'))};">{label(gw.get('cell_class'))}</span>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{out_of(gw.get('parcel_150m_score'))}</span> ({label(gw.get('parcel_150m_class'))})</div>
+        <div class="detail-line"><strong>Top Drilling Site:</strong> <span class="mono">{distance(cand(gw, 'primary_borehole_candidate').get('distance_km'))}</span> away</div>
       </div>
 
       <!-- Minerals -->
       <div class="card card--mineral">
         <h3>Mineral Prospectivity</h3>
-        <div class="big-score" style="color: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_score', 'N/A')}</div>
-        <span class="score-badge" style="background: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{minerals.get('parcel_150m_score', 'N/A')}/100</span> ({minerals.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Nearest Target:</strong> <span class="mono">{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</span> away</div>
+        <div class="big-score" style="color: {band(minerals.get('cell_score'))};">{score(minerals.get('cell_score'))}</div>
+        <span class="score-badge" style="background: {band(minerals.get('cell_score'))};">{label(minerals.get('cell_class'))}</span>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{out_of(minerals.get('parcel_150m_score'))}</span> ({label(minerals.get('parcel_150m_class'))})</div>
+        <div class="detail-line"><strong>Nearest Target:</strong> <span class="mono">{distance(cand(minerals, 'primary_mineral_target').get('distance_km'))}</span> away</div>
       </div>
 
       <!-- Soil & Land -->
       <div class="card card--soil">
-        <h3>Land & Soil Capability</h3>
-        <div class="big-score" style="color: {score_color(soil.get('cell_score'))};">{soil.get('cell_score', 'N/A')}</div>
-        <span class="score-badge" style="background: {score_color(soil.get('cell_score'))};">{soil.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{soil.get('parcel_150m_score', 'N/A')}/100</span> ({soil.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Prime Land Zone:</strong> <span class="mono">{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</span> away</div>
+        <h3>Land &amp; Soil Capability</h3>
+        <div class="big-score" style="color: {band(soil.get('cell_score'))};">{score(soil.get('cell_score'))}</div>
+        <span class="score-badge" style="background: {band(soil.get('cell_score'))};">{label(soil.get('cell_class'))}</span>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{out_of(soil.get('parcel_150m_score'))}</span> ({label(soil.get('parcel_150m_class'))})</div>
+        <div class="detail-line"><strong>Prime Land Zone:</strong> <span class="mono">{distance(cand(soil, 'primary_agricultural_zone').get('distance_km'))}</span> away</div>
       </div>
 
       <!-- Hazard & Risk -->
       <div class="card card--hazard">
         <h3>Site Safety Index</h3>
-        <div class="big-score" style="color: {score_color(haz.get('safety_score'))};">{haz.get('safety_score', 'N/A')}</div>
-        <span class="score-badge" style="background: {hazard_color(haz.get('hazard_score'))};">Hazard: {haz.get('hazard_score', 'N/A')}/100</span>
-        <div class="detail-line"><strong>Classification:</strong> {haz.get('hazard_class', 'N/A')}</div>
-        <div class="detail-line"><strong>Safest Building Site:</strong> <span class="mono">{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</span> away</div>
+        <div class="big-score" style="color: {band(haz.get('safety_score'))};">{score(haz.get('safety_score'))}</div>
+        <span class="score-badge" style="background: {band(haz.get('hazard_score'), lower_is_better=True)};">Hazard: {out_of(haz.get('hazard_score'))}</span>
+        <div class="detail-line"><strong>Classification:</strong> {label(haz.get('hazard_class'))}</div>
+        <div class="detail-line"><strong>Safest Building Site:</strong> <span class="mono">{distance(cand(haz, 'primary_safe_build_site').get('distance_km'))}</span> away</div>
       </div>
 
     </div>
 
     <!-- Actionable GPS Recommendations Table -->
     <div class="section-title">2. Prioritised Field Verification Coordinates (Top Ranked per Category)</div>
+    <div class="note">
+      <strong>Three ranked points per category, not one:</strong> candidates are ordered within
+      this survey area, so work the list top-down &mdash; the second and third are the fallbacks
+      when the highest-scoring cell is already spoken for. On a phone, swipe the table sideways
+      to reach the remaining columns.
+    </div>
+    <div class="table-wrap">
     <table class="target-table">
       <thead>
         <tr>
@@ -709,44 +922,10 @@ def _build_html_report(dossier: dict) -> str:
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong style="color:var(--water);">Groundwater Siting</strong></td>
-          <td><span class="mono">#1 Candidate</span></td>
-          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('latitude', 'N/A')}</td>
-          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('longitude', 'N/A')}</td>
-          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</td>
-          <td><strong class="mono">{cand(gw, 'primary_borehole_candidate').get('potential_score', 'N/A')}/100</strong></td>
-          <td>Vertical Electrical Sounding (VES) resistivity verification</td>
-        </tr>
-        <tr>
-          <td><strong style="color:var(--mineral);">Mineral Exploration</strong></td>
-          <td><span class="mono">#1 Target</span></td>
-          <td class="mono">{cand(minerals, 'primary_mineral_target').get('latitude', 'N/A')}</td>
-          <td class="mono">{cand(minerals, 'primary_mineral_target').get('longitude', 'N/A')}</td>
-          <td class="mono">{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</td>
-          <td><strong class="mono">{cand(minerals, 'primary_mineral_target').get('prospectivity_score', 'N/A')}/100</strong></td>
-          <td>Ground geological mapping & soil geochemical sampling</td>
-        </tr>
-        <tr>
-          <td><strong style="color:var(--soil);">Soil & Agriculture</strong></td>
-          <td><span class="mono">#1 Zone</span></td>
-          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('latitude', 'N/A')}</td>
-          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('longitude', 'N/A')}</td>
-          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</td>
-          <td><strong class="mono">{cand(soil, 'primary_agricultural_zone').get('capability_score', 'N/A')}/100</strong></td>
-          <td>Agronomic soil profile test & pH analysis</td>
-        </tr>
-        <tr>
-          <td><strong style="color:var(--hazard);">Safest Building Site</strong></td>
-          <td><span class="mono">#1 Safe Zone</span></td>
-          <td class="mono">{cand(haz, 'primary_safe_build_site').get('latitude', 'N/A')}</td>
-          <td class="mono">{cand(haz, 'primary_safe_build_site').get('longitude', 'N/A')}</td>
-          <td class="mono">{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</td>
-          <td><strong class="mono">{cand(haz, 'primary_safe_build_site').get('safety_score', 'N/A')}/100</strong></td>
-          <td>Geotechnical soil compaction & foundation investigation</td>
-        </tr>
+{coord_rows_html}
       </tbody>
     </table>
+    </div>
 
     <!-- Satellite Intelligence Cartography -->
     <div class="section-title">3. High-Resolution Satellite Evidence & Siting Maps</div>
