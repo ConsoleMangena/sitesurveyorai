@@ -298,8 +298,8 @@ The product's risk is not that the math is wrong — it's that the language outr
 
 ## 9. Security & operations
 
-- **Authn/authz on every data path**, including `/api/dossier`, `/api/report` and `/outputs/*` — today these serve the last client's report, including name and street address, to anyone. Per-tenant job ownership; signed, expiring artifact URLs.
-- **CORS**: replace wildcard-with-credentials ([src/api.py:76-82](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/api.py#L76-L82)) with an explicit allow-list; re-enable DNS-rebinding protection or demonstrate it's unnecessary at the proxy.
+- **Authn/authz on every data path**, including `/api/dossier`, `/api/report` and `/outputs/*` — today these serve the last client's report, including name and street address, to anyone. **Now literally true of the internet**: the service is public at `sitesurveyor-engine.onrender.com` with no auth, so any visitor can POST `/api/*` and occupy the instance for minutes, and read whichever site was analyzed last. Per-tenant job ownership; signed, expiring artifact URLs.
+- **CORS** — done. Wildcard-with-credentials is gone; an explicit `ALLOWED_ORIGINS` allow-list plus a same-origin guard on the MCP SSE transport, and with the list empty no cross-origin browser call is served at all (preflight answers 403, verified live).
 - **Secrets**: testing against a live key is your call. Two facts worth holding — the value stays readable in git history after the file is cleaned, so revocation rather than removal is the fix; and if that PAT is reused by other pipelines, revoking it breaks them too. Placeholder in repo, secret in Render env, is the shape to return to when testing ends.
 - **Error hygiene**: typed codes to clients, tracebacks logged server-side against `job_id`.
 - **Quota & abuse**: per-key rate limits, per-request compute ceilings, and respect for the fact that the upstream WCS is a shared research service.
@@ -314,16 +314,18 @@ The product's risk is not that the math is wrong — it's that the language outr
 **Phase 0 — make it safe to run at all** *(no new capability)*
 Fix and prove: NaN→"Very High" classification; `nan_to_num` no-data-as-zero-evidence in hazard/lineaments; sink-fill ε + DEM buffering + consistent filled/unfilled TWI; per-job workspace and immutable `SiteContext`; auth on artifact paths; band resolution by name; a `pytest` suite with golden rasters for terrain/spectral/classification, plus a concurrency test that runs two AOIs in parallel and asserts neither result is contaminated.
 
-*Status — scoring integrity landed (42 passing, 2 xfail-red-line tests in `tests/`)*:
+*Status — scoring integrity landed (59 passing, 2 xfail-red-line tests in `tests/`)*:
 - No-data is no longer evidence: class 255 for unobserved cells, NaN carried through `robust_norm`/`fmax`/weighted sums, `null` instead of bare `NaN` in JSON, gray voids with a legend entry on every map.
 - Terrain/hydrology: ε-flood removes false pits on plateaus, void-rim seeding stops valid ground behind a hole being drained, accumulation is NaN inside voids, negative TWI retained, and the `np.gradient` stencil now voids cells touching a hole (a lone DEM void used to read as "flat, infiltrative").
 - SAR structure: edges suppressed along void boundaries, lineament/intersection/drainage densities divided by *observed* area and NaN below 34% coverage.
 - Determinism: `residual_index` samples evenly through NDVI order instead of drawing a fresh random subsample per run; Hough seeded.
 - Provenance honesty: "layer integrated" is now derived from successful use (plus the error string), not from a file existing; the dossier reports `not_run` vs `unreadable (...)`; a survey with no candidates no longer crashes the HTML report.
 - Spectral: void scenes produce NaN without 0/0 warnings flooding the log; an under-populated detrend returns no-data rather than passing the raw ratio through mislabelled as a residual.
+- Honesty must not erase the answer: making no-data NaN let `uniform_filter(dem, size=15)` poison *every* window on a grid with a few percent DEM holes (225 cells per window, so one hole in 30 is enough), and because the composite is a NaN-propagating weighted sum, one dead layer voided the entire mineral index — 96% "No data", `nan` target, zero candidates, and a report that looked like a genuine "no prospectivity here". The neighbourhood mean is now taken over observed cells only (`local_relief`), and that survey scores 23.8/100 with 8 targets on the same data. Any new filter over a NaN-bearing array needs the same treatment; the boolean-mask filters in `lineaments`/`terrain` were already safe.
 
 *Still open in Phase 0*: immutable per-job `SiteContext` + namespaced output directory (`tests/test_site_isolation.py` documents the two collisions as strict xfail), band resolution by name, artifact-path auth, golden-raster fixtures, and the terrain cost below.
 **Performance item**: `fill_sinks` 6.74 s + `d8_flow` 3.35 s on an 856×901 grid — ~10 s per DEM pass, and `water.py` was routing flow twice before the fix. A worker pool sizing and any `terrain` tool latency budget must use this, not a per-pixel estimate.
+**Memory budget** (`tools/measure_rss.py`, one survey per process, warm data): the export stage owns the peak, and the peak is the map render buffer, which scales with output megapixels — `savefig` dpi, not dtype or resampling method. A mineral survey peaked at 582 MB with maps at 200 dpi and 427 MB at 120; the import floor is 111 MB and the analysis steady state 270–330 MB. That is why `MAP_DPI` is a single config knob (default 150, pinned to 120 on the starter plan in `render.yaml`) instead of sixteen hardcoded literals, and why the worker pool cannot be sized by counting CPUs: N workers is N × one survey's peak, so the per-job `SiteContext` and the memory ceiling have to be settled together.
 **Done when**: regression and concurrency tests pass, and no `except: pass` remains in a scoring path.
 
 **Phase 1 — MCP surface v2 (discovery + primitives + async)**
