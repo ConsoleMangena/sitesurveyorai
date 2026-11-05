@@ -63,23 +63,48 @@ def _url(coverage: str, bbox: tuple[float, float, float, float], stamp: str | No
     return f"{cfg.WCS_URL}?{'&'.join(params)}"
 
 
+CHUNK_BYTES = 1 << 20
+
+
 def _download(url: str, out: Path, retries: int = 4, optional: bool = False) -> bool:
-    """Download raster with retry logic and GeoTIFF header validation."""
+    """Download raster with retry logic and GeoTIFF header validation.
+
+    The body is streamed to a part file rather than read into `r.content`: a 14-band
+    annual mosaic is hundreds of megabytes, and buffering it alongside the analysis that
+    follows is what pushed the instance over its memory limit during a cold fetch.
+    """
+    tmp = out.with_name(f"{out.stem}.part")
     for attempt in range(1, retries + 1):
         try:
-            r = requests.get(url, headers=cfg.HEADERS, timeout=300)
-            if r.status_code == 200 and len(r.content) > 4 and r.content[:2] in (b"II", b"MM"):
-                out.write_bytes(r.content)
-                with rasterio.open(out) as ds:
-                    print(f"[ok] {out.stem:12s} {ds.count:2d} band(s)  {ds.width}x{ds.height}  {ds.crs}")
-                return True
-            if optional and r.status_code in (404, 400):
-                print(f"[skip] {out.stem}: no data in archive ({r.status_code})")
-                return False
-            print(f"[retry {attempt}] {out.stem}: HTTP {r.status_code} {r.text[:120]}")
+            with requests.get(url, headers=cfg.HEADERS, timeout=300, stream=True) as r:
+                if r.status_code != 200:
+                    tmp.unlink(missing_ok=True)
+                    if optional and r.status_code in (404, 400):
+                        print(f"[skip] {out.stem}: no data in archive ({r.status_code})")
+                        return False
+                    print(f"[retry {attempt}] {out.stem}: HTTP {r.status_code}")
+                else:
+                    with open(tmp, "wb") as fh:
+                        for chunk in r.iter_content(chunk_size=CHUNK_BYTES):
+                            fh.write(chunk)
+                    with open(tmp, "rb") as fh:
+                        magic = fh.read(2)
+                        size = tmp.stat().st_size
+                        head = fh.read(120) if size <= 4 or magic not in (b"II", b"MM") else b""
+                    if size <= 4 or magic not in (b"II", b"MM"):
+                        tmp.unlink(missing_ok=True)
+                        print(f"[retry {attempt}] {out.stem}: not a GeoTIFF: {head!r}")
+                    else:
+                        os.replace(tmp, out)
+                        with rasterio.open(out) as ds:
+                            print(f"[ok] {out.stem:12s} {ds.count:2d} band(s)  "
+                                  f"{ds.width}x{ds.height}  {ds.crs}")
+                        return True
         except Exception as exc:
+            tmp.unlink(missing_ok=True)
             print(f"[retry {attempt}] {out.stem}: {exc}")
         _time.sleep(2 * attempt)
+    tmp.unlink(missing_ok=True)
     if optional:
         print(f"[skip] {out.stem}: unavailable after {retries} retries")
         return False
