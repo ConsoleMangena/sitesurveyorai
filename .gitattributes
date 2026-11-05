@@ -1,0 +1,4 @@
+# core.autocrlf=true on the dev machine otherwise checks these out with CRLF, and a local
+# docker build then copies that into the image: the shebang line ends in \r, so the
+# container dies at entrypoint with a misleading "no such file or directory".
+*.sh text eol=lf
