@@ -3,892 +3,1178 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SiteSurveyor AI — Digital Earth Africa Geospatial Sandbox</title>
-  <meta name="description" content="Pick a coordinate in Africa and screen groundwater, mineral, soil and natural-hazard potential from Copernicus Sentinel-2, ALOS PALSAR, Landsat and CHIRPS satellite data.">
-  <meta name="theme-color" content="#0b4f6c">
+  <meta name="color-scheme" content="dark">
+  <title>SiteSurveyor AI — Geospatial Screening Workspace</title>
+  <meta name="description" content="A GIS workspace for satellite site screening: pick a coordinate in Africa and evaluate groundwater, mineral, soil and hazard potential from Digital Earth Africa imagery.">
+  <meta name="theme-color" content="#0a1220">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="SiteSurveyor AI — Satellite Site Screening">
-  <meta property="og:description" content="Autonomous multi-criteria satellite screening for groundwater, minerals, soil capability and natural hazards.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b4f6c'/%3E%3Ccircle cx='32' cy='32' r='16' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23ffffff'/%3E%3C/svg%3E">
+  <meta property="og:title" content="SiteSurveyor AI — Geospatial Screening Workspace">
+  <meta property="og:description" content="Multi-criteria satellite screening for groundwater, minerals, soil capability and natural hazards.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a1220'/%3E%3Ccircle cx='32' cy='32' r='15' fill='none' stroke='%2337b6ff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='4.5' fill='%2323d3c4'/%3E%3C/svg%3E">
 
-  <!-- Leaflet CSS & JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <style>
     :root {
-      --primary: #0b4f6c;
-      --primary-dark: #08374c;
-      --primary-light: #e8f4f8;
-      --accent-water: #0284c7;
-      --accent-mineral: #d97706;
-      --accent-soil: #16a34a;
-      --accent-hazard: #dc2626;
-      --accent-safety: #059669;
-      --bg-dark: #0f172a;
-      --bg-card: #ffffff;
-      --text-main: #1e293b;
-      --text-muted: #475569;
-      --text-subtle: #64748b;
-      --border: #e2e8f0;
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
-      --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.12);
+      --bg: #0a1220;
+      --bg-deep: #070d18;
+      --panel: #0f1a2b;
+      --panel-raised: #132134;
+      --panel-sunken: #0b1524;
+      --line: #1d2c42;
+      --line-strong: #27394f;
+      --text: #e7eef8;
+      --muted: #93a7c0;
+      --dim: #6b7f99;
+      --accent: #37b6ff;
+      --accent-soft: rgba(55, 182, 255, 0.14);
+      --teal: #23d3c4;
+      --water: #38bdf8;
+      --mineral: #f5a524;
+      --soil: #34d399;
+      --hazard: #fb7185;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --radius: 10px;
+      --radius-sm: 7px;
+      --shadow: 0 18px 40px rgba(2, 8, 18, 0.45);
+      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --topbar-h: 58px;
+      --status-h: 30px;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
 
     body {
-      background-color: #f8fafc;
-      color: var(--text-main);
+      margin: 0;
+      background: var(--bg-deep);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
       display: flex;
       flex-direction: column;
-      height: 100vh;
       overflow: hidden;
+    }
+
+    h1, h2, h3, p, dl, dd, dt, ul, li, fieldset { margin: 0; padding: 0; }
+    ul { list-style: none; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
 
-    :focus-visible {
-      outline: 3px solid #0284c7;
-      outline-offset: 2px;
+    .skip-link {
+      position: absolute; left: 12px; top: -60px; z-index: 5000;
+      background: var(--accent); color: #04121f; font-weight: 700;
+      padding: 8px 14px; border-radius: 8px; text-decoration: none;
+      transition: top 0.15s ease;
     }
+    .skip-link:focus { top: 10px; }
 
-    /* Header Bar */
-    header {
-      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-      color: #ffffff;
-      padding: 12px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      box-shadow: var(--shadow-md);
-      z-index: 1000;
-      flex-wrap: wrap;
-    }
-
-    .brand-group {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .logo-badge {
-      background: #ffffff;
-      color: var(--primary);
-      font-weight: 900;
-      font-size: 16px;
-      padding: 6px 12px;
-      border-radius: 8px;
-      letter-spacing: 0.5px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-      white-space: nowrap;
-    }
-
-    .title-box h1 {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-    }
-
-    .title-box p {
-      font-size: 11px;
-      opacity: 0.9;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .badge-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      padding: 5px 12px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 500;
-      color: #f1f5f9;
-    }
-
-    .badge-status .dot {
-      width: 8px;
-      height: 8px;
-      background: #10b981;
-      border-radius: 50%;
-      box-shadow: 0 0 8px #10b981;
-    }
-
-    .nav-btn {
-      background: rgba(255, 255, 255, 0.12);
-      color: #ffffff;
-      text-decoration: none;
-      padding: 6px 14px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      transition: background 0.2s;
-    }
-
-    .nav-btn:hover {
-      background: rgba(255, 255, 255, 0.25);
-    }
-
-    /* Main Layout */
-    .app-body {
-      display: flex;
-      flex: 1;
-      height: calc(100vh - 60px);
-      position: relative;
-      min-height: 0;
-    }
-
-    /* Left Control & Intelligence Sidebar */
-    .sidebar {
-      width: 440px;
-      background: #ffffff;
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      overflow-y: auto;
-      z-index: 500;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .panel-section {
-      padding: 18px 20px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .section-heading {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--primary);
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .form-group {
-      margin-bottom: 12px;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 5px;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .input-control {
-      width: 100%;
-      padding: 8px 10px;
-      font-size: 13px;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      background: #f8fafc;
-      color: var(--text-main);
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-
-    .input-control:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(11, 79, 108, 0.18);
-      background: #ffffff;
-    }
-
-    .field-hint {
-      font-size: 11px;
-      color: var(--text-subtle);
-      margin-top: 4px;
-      line-height: 1.4;
-    }
-
-    .category-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 4px;
-    }
-
-    .pill-checkbox {
-      position: absolute;
-      opacity: 0;
-      width: 1px;
-      height: 1px;
-    }
-
-    .pill-label {
-      display: inline-flex;
-      align-items: center;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 6px 12px;
-      border-radius: 16px;
-      border: 1px solid #cbd5e1;
-      background: #f1f5f9;
-      color: var(--text-muted);
-      transition: all 0.15s;
-      user-select: none;
-    }
-
-    .pill-checkbox:checked + .pill-label {
-      background: var(--primary);
-      color: #ffffff;
-      border-color: var(--primary);
-    }
-
-    .pill-checkbox:focus-visible + .pill-label {
-      outline: 3px solid #0284c7;
-      outline-offset: 2px;
-    }
-
-    .btn-submit {
-      width: 100%;
-      background: var(--primary);
-      color: #ffffff;
-      border: none;
-      padding: 12px;
-      font-size: 13.5px;
-      font-weight: 600;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: background 0.2s, transform 0.1s;
-      box-shadow: 0 2px 6px rgba(11, 79, 108, 0.25);
-    }
-
-    .btn-submit:hover {
-      background: var(--primary-dark);
-    }
-
-    .btn-submit:active {
-      transform: translateY(1px);
-    }
-
-    .btn-submit:disabled {
-      background: #94a3b8;
-      cursor: progress;
-    }
-
-    /* Progress + errors */
-    .progress {
-      margin-top: 12px;
-      height: 8px;
-      background: #e2e8f0;
-      border-radius: 999px;
-      overflow: hidden;
-    }
-
-    .progress-bar {
-      height: 100%;
-      width: 0;
-      background: linear-gradient(90deg, #0284c7, #0b4f6c);
-      transition: width 0.4s ease;
-    }
-
-    .progress-stage {
-      font-size: 11.5px;
-      color: var(--text-muted);
-      margin-top: 6px;
-      min-height: 16px;
-    }
-
-    .error-region {
-      margin-top: 12px;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      border-left: 4px solid #dc2626;
-      border-radius: 6px;
-      padding: 10px 12px;
-      font-size: 12px;
-      color: #7f1d1d;
-      line-height: 1.45;
-    }
-
-    .error-region strong {
-      display: block;
-      margin-bottom: 3px;
-      font-size: 12.5px;
-    }
-
-    .error-region .error-hint {
-      color: #991b1b;
-      margin-top: 5px;
-      font-size: 11.5px;
-    }
-
-    .error-region .error-id {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10.5px;
-      color: #b91c1c;
-      margin-top: 5px;
-    }
-
-    /* Scorecard Cards */
-    .scorecard-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 6px;
-    }
-
-    .score-card {
-      background: #f8fafc;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      border-left: 4px solid var(--primary);
-    }
-
-    .score-card.water { border-left-color: var(--accent-water); }
-    .score-card.minerals { border-left-color: var(--accent-mineral); }
-    .score-card.soil { border-left-color: var(--accent-soil); }
-    .score-card.hazard { border-left-color: var(--accent-safety); }
-
-    .card-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-
-    .card-score {
-      font-size: 24px;
-      font-weight: 800;
-      color: var(--text-main);
-      line-height: 1;
-    }
-
-    .card-score span {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-subtle);
-    }
-
-    .card-badge {
-      display: inline-block;
-      font-size: 10.5px;
-      font-weight: 700;
-      padding: 2px 7px;
-      border-radius: 10px;
-      margin-top: 6px;
-      text-transform: uppercase;
-      background: #e2e8f0;
-      color: #334155;
-    }
-
-    .badge-high { background: #dcfce7; color: #15803d; }
-    .badge-mod  { background: #fef9c3; color: #854d0e; }
-    .badge-low  { background: #fee2e2; color: #991b1b; }
-    .badge-na   { background: #e2e8f0; color: #475569; }
-
-    .results-note {
-      font-size: 11.5px;
-      color: var(--text-muted);
-      background: var(--primary-light);
-      border-radius: 6px;
-      padding: 8px 10px;
-      margin-bottom: 10px;
-      line-height: 1.45;
-    }
-
-    /* Candidates List */
-    .candidates-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      max-height: 260px;
-      overflow-y: auto;
-    }
-
-    .cand-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      text-align: left;
-      background: #ffffff;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 12px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-
-    .cand-item:hover {
-      border-color: var(--primary);
-      background: var(--primary-light);
-    }
-
-    .cand-empty {
-      font-size: 12px;
-      color: var(--text-subtle);
-      text-align: center;
-      padding: 18px 10px;
-      line-height: 1.5;
-    }
-
-    .cand-rank {
-      font-weight: 800;
-      color: var(--primary);
-      width: 28px;
+    /* ------------------------------------------------------------------ app bar */
+    .app-bar {
+      height: var(--topbar-h);
       flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 16px;
+      background: linear-gradient(180deg, #101d30 0%, #0b1626 100%);
+      border-bottom: 1px solid var(--line);
+      z-index: 1200;
     }
 
-    .cand-info {
-      flex: 1;
-      padding: 0 8px;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
       min-width: 0;
     }
 
-    .cand-name {
-      font-weight: 600;
-      font-size: 12px;
-    }
-
-    .cand-coords {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .cand-score {
-      font-weight: 700;
-      font-size: 13px;
-      color: var(--text-main);
-      white-space: nowrap;
-    }
-
-    /* Deliverables Bar */
-    .actions-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .btn-action {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 9px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      border-radius: 6px;
-      text-decoration: none;
-      border: 1px solid #cbd5e1;
-      background: #f8fafc;
-      color: #334155;
-      transition: all 0.15s;
-      text-align: center;
-    }
-
-    .btn-action:hover {
-      background: var(--primary);
-      color: #ffffff;
-      border-color: var(--primary);
-    }
-
-    .btn-action.featured {
-      background: #0284c7;
-      color: #ffffff;
-      border-color: #0284c7;
-      grid-column: span 2;
-    }
-
-    .btn-action.featured:hover {
-      background: #0369a1;
-    }
-
-    .btn-action.is-disabled,
-    .btn-action[aria-disabled="true"] {
-      opacity: 0.45;
-      pointer-events: none;
-    }
-
-    /* Disclaimer */
-    .disclaimer {
-      font-size: 11px;
-      color: var(--text-subtle);
-      line-height: 1.45;
-      padding: 12px 20px;
-      background: #f8fafc;
-      font-style: italic;
-    }
-
-    /* Map Canvas */
-    #map {
-      flex: 1;
-      height: 100%;
-      min-height: 320px;
-      background: #0f172a;
-    }
-
-    /* Map Overlay Banner */
-    .map-banner {
-      position: absolute;
-      top: 14px;
-      right: 14px;
-      background: rgba(15, 23, 42, 0.9);
-      backdrop-filter: blur(8px);
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 8px 16px;
-      font-size: 11.5px;
-      z-index: 1000;
-      box-shadow: var(--shadow-md);
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      max-width: min(420px, 60vw);
-    }
-
-    .map-banner strong {
-      color: #38bdf8;
-    }
-
-    /* Loading Spinner */
-    .spinner {
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top: 2px solid #ffffff;
-      width: 14px;
-      height: 14px;
-      animation: spin 0.8s linear infinite;
+    .brand__mark {
+      width: 30px; height: 30px;
+      border-radius: 9px;
+      display: grid; place-items: center;
+      background: linear-gradient(140deg, rgba(55,182,255,0.22), rgba(35,211,196,0.18));
+      border: 1px solid rgba(55, 182, 255, 0.35);
       flex: 0 0 auto;
     }
 
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    .brand__text { min-width: 0; }
+    .brand__name {
+      font-size: 13.5px; font-weight: 700; letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .brand__org {
+      font-size: 10px; color: var(--dim); letter-spacing: 1.1px; text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .project-chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 5px 11px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .project-chip i {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--teal); box-shadow: 0 0 8px rgba(35,211,196,0.8);
+    }
+
+    .toolbar {
+      display: flex; align-items: center; gap: 8px;
+      margin-left: auto;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .toolbar::-webkit-scrollbar { display: none; }
+
+    .tool {
+      display: inline-flex; align-items: center; gap: 7px;
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--panel-raised);
+      color: var(--text);
+      font-size: 12px; font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s, transform 0.08s;
+    }
+    .tool:hover { background: #182940; border-color: var(--line-strong); }
+    .tool:active { transform: translateY(1px); }
+    .tool svg { opacity: 0.85; }
+
+    .tool--primary {
+      background: linear-gradient(180deg, #2aa9f0, #1a84c6);
+      border-color: #2f9fdc;
+      color: #04121f;
+      font-weight: 700;
+    }
+    .tool--primary:hover { background: linear-gradient(180deg, #45b8f8, #1f91d6); }
+    .tool--primary:disabled { opacity: 0.6; cursor: progress; }
+
+    .tool--ghost { background: transparent; }
+
+    .app-bar__right {
+      display: flex; align-items: center; gap: 10px;
+      padding-left: 6px;
+      border-left: 1px solid var(--line);
+    }
+
+    .engine-pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 11px; color: var(--muted);
+      padding: 5px 10px; border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      white-space: nowrap;
+    }
+    .engine-pill i {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 7px rgba(52,211,153,0.8);
+    }
+    .engine-pill[data-state="running"] i { background: var(--warn); box-shadow: 0 0 7px rgba(251,191,36,0.9); animation: pulse 1.4s ease-in-out infinite; }
+    .engine-pill[data-state="error"] i { background: var(--bad); box-shadow: 0 0 7px rgba(251,113,133,0.9); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.75); }
+    }
+
+    /* ------------------------------------------------------------------ workspace */
+    .workspace {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 286px minmax(0, 1fr) 404px;
+      background: var(--bg-deep);
+    }
+
+    .workspace.is-left-collapsed { grid-template-columns: 0 minmax(0, 1fr) 404px; }
+    .workspace.is-right-collapsed { grid-template-columns: 286px minmax(0, 1fr) 0; }
+    .workspace.is-left-collapsed.is-right-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
+    .workspace.is-left-collapsed .panel--left,
+    .workspace.is-right-collapsed .panel--right { display: none; }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--panel);
+    }
+    .panel--left { border-right: 1px solid var(--line); }
+    .panel--right { border-left: 1px solid var(--line); }
+
+    .panel__header {
+      flex: 0 0 auto;
+      height: 40px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 10px 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-raised);
+    }
+
+    .panel__title {
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 1.1px; text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .panel__actions { margin-left: auto; display: flex; gap: 4px; }
+
+    .icon-btn {
+      width: 26px; height: 26px;
+      display: grid; place-items: center;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .icon-btn:hover { background: #1b2c44; color: var(--text); }
+
+    .panel__body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+      scrollbar-color: #26374f transparent;
+    }
+    .panel__body::-webkit-scrollbar { width: 9px; }
+    .panel__body::-webkit-scrollbar-thumb {
+      background: #26374f; border-radius: 999px; border: 2px solid var(--panel);
+    }
+
+    .block { padding: 16px; border-bottom: 1px solid var(--line); }
+    .block:last-child { border-bottom: 0; }
+
+    .block__title {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10.5px; font-weight: 700;
+      letter-spacing: 1.1px; text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 11px;
+    }
+    .block__count {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--dim);
+      background: rgba(255,255,255,0.04);
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+
+    /* ------------------------------------------------------------------ layers / legend */
+    .layer-list { display: flex; flex-direction: column; gap: 3px; }
+
+    .layer {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      color: var(--text);
+      font-size: 12px;
+      transition: background 0.15s;
+    }
+    .layer:hover { background: rgba(255,255,255,0.035); }
+
+    .layer input[type="checkbox"], .layer input[type="radio"] {
+      appearance: none;
+      width: 15px; height: 15px;
+      flex: 0 0 auto;
+      border: 1.5px solid #3a5070;
+      border-radius: 4px;
+      background: #0a1524;
+      display: grid; place-items: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .layer input[type="radio"] { border-radius: 50%; }
+    .layer input[type="checkbox"]::after {
+      content: ""; width: 8px; height: 8px; border-radius: 2px;
+      background: var(--accent); transform: scale(0); transition: transform 0.12s;
+    }
+    .layer input[type="radio"]::after {
+      content: ""; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); transform: scale(0); transition: transform 0.12s;
+    }
+    .layer input:checked { border-color: var(--accent); background: var(--accent-soft); }
+    .layer input:checked::after { transform: scale(1); }
+
+    .swatch {
+      width: 11px; height: 11px; border-radius: 3px; flex: 0 0 auto;
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+    .swatch--water { background: var(--water); }
+    .swatch--mineral { background: var(--mineral); }
+    .swatch--soil { background: var(--soil); }
+    .swatch--hazard { background: var(--hazard); }
+    .swatch--aoi { background: transparent; border: 1.5px dashed var(--accent); border-radius: 2px; }
+    .swatch--cand { background: linear-gradient(135deg, var(--water), var(--teal)); border-radius: 50%; }
+
+    .legend-bands {
+      display: flex; gap: 4px; margin-top: 12px;
+      font-size: 9.5px; color: var(--dim);
+    }
+    .legend-bands span {
+      flex: 1; text-align: center; padding: 4px 0;
+      border-radius: 4px;
+    }
+    .band-low { background: rgba(251,113,133,0.16); color: #fda4af; }
+    .band-mid { background: rgba(251,191,36,0.14); color: #fcd34d; }
+    .band-high { background: rgba(52,211,153,0.16); color: #6ee7b7; }
+
+    .kv { display: flex; flex-direction: column; gap: 9px; }
+    .kv > div { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: baseline; }
+    .kv dt { font-size: 10.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--dim); }
+    .kv dd {
+      font-family: var(--mono); font-size: 11px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* ------------------------------------------------------------------ map */
+    .map-wrap {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      background: #050b14;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      background: #050b14;
+      z-index: 0;
+    }
+
+    .map-chips {
+      position: absolute;
+      top: 12px; left: 12px;
+      z-index: 500;
+      display: flex; flex-wrap: wrap; gap: 6px;
+      max-width: calc(100% - 24px);
+      pointer-events: none;
+    }
+
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(9, 18, 31, 0.82);
+      border: 1px solid rgba(255,255,255,0.09);
+      backdrop-filter: blur(10px);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+    }
+    .chip b { color: var(--text); font-weight: 600; }
+    .chip--accent b { color: var(--accent); }
+
+    .map-hint {
+      position: absolute;
+      bottom: 12px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 500;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(9, 18, 31, 0.85);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--dim);
+      font-size: 11px;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    .map-hint.is-hidden { opacity: 0; }
+
+    .leaflet-container {
+      font-family: 'Inter', sans-serif;
+      background: #050b14;
+    }
+    .leaflet-control-zoom a {
+      background: #0e1a2b !important;
+      color: var(--text) !important;
+      border-color: var(--line) !important;
+    }
+    .leaflet-control-zoom a:hover { background: #17273d !important; }
+    .leaflet-control-scale-line {
+      background: rgba(9, 18, 31, 0.82) !important;
+      color: var(--muted) !important;
+      border-color: var(--line-strong) !important;
+      font-family: var(--mono);
+      font-size: 9.5px;
+    }
+    .leaflet-popup-content-wrapper {
+      background: #0e1a2b;
+      color: var(--text);
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      box-shadow: var(--shadow);
+    }
+    .leaflet-popup-tip { background: #0e1a2b; border: 1px solid var(--line-strong); }
+    .leaflet-popup-close-button { color: var(--muted) !important; }
+    .leaflet-bar a { border-radius: 6px !important; }
+
+    .pin {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.92);
+      display: grid; place-items: center;
+      font-size: 10px; font-weight: 800; color: #04121f;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.55);
+    }
+
+    /* ------------------------------------------------------------------ analysis form */
+    .field { margin-bottom: 12px; }
+    .field__label {
+      display: block;
+      font-size: 10.5px; font-weight: 600;
+      letter-spacing: 0.7px; text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 6px;
+    }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .input, .select {
+      width: 100%;
+      height: 34px;
+      padding: 0 10px;
+      background: var(--panel-sunken);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 12.5px;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    .input--mono { font-family: var(--mono); font-size: 12px; }
+    .input::placeholder { color: #55688a; }
+    .input:hover, .select:hover { border-color: #35506f; }
+    .input:focus, .select:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: #0c1828;
+      box-shadow: 0 0 0 3px rgba(55,182,255,0.14);
+    }
+    .select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2393a7c0' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 30px;
+    }
+
+    .hint {
+      font-size: 10.5px;
+      color: var(--dim);
+      line-height: 1.5;
+      margin-top: 6px;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      padding: 3px;
+      background: var(--panel-sunken);
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+    }
+    .segmented label { position: relative; }
+    .segmented input {
+      position: absolute; opacity: 0; width: 1px; height: 1px;
+    }
+    .segmented span {
+      display: block;
+      text-align: center;
+      padding: 6px 2px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .segmented span:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .segmented input:checked + span {
+      background: var(--accent-soft);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(55,182,255,0.35);
+    }
+    .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    .run {
+      width: 100%;
+      height: 38px;
+      margin-top: 4px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid #2f9fdc;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #2aa9f0, #1a84c6);
+      color: #04121f;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.08s;
+    }
+    .run:hover { background: linear-gradient(180deg, #45b8f8, #1f91d6); }
+    .run:active { transform: translateY(1px); }
+    .run:disabled { opacity: 0.65; cursor: progress; }
+
+    .spinner {
+      width: 13px; height: 13px;
+      border: 2px solid rgba(4,18,31,0.25);
+      border-top-color: #04121f;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .progress {
+      margin-top: 10px;
+      height: 4px;
+      border-radius: 999px;
+      background: #16243a;
+      overflow: hidden;
+    }
+    .progress__bar {
+      height: 100%; width: 0;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--teal));
+      transition: width 0.45s ease;
+    }
+
+    .progress-stage {
+      display: flex; justify-content: space-between; gap: 8px;
+      font-size: 10.5px;
+      color: var(--muted);
+      margin-top: 7px;
+      min-height: 14px;
+    }
+    .progress-stage b { font-family: var(--mono); font-weight: 500; color: var(--accent); }
+
+    .alert {
+      margin-top: 12px;
+      border: 1px solid rgba(251,113,133,0.4);
+      border-left: 3px solid var(--bad);
+      background: rgba(251,113,133,0.08);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: #ffd9df;
+    }
+    .alert strong { display: block; font-size: 12px; margin-bottom: 3px; color: #ffe4e8; }
+    .alert .alert__hint { color: #f6b9c3; margin-top: 5px; }
+    .alert .alert__id { font-family: var(--mono); font-size: 10px; color: #f19aa7; margin-top: 6px; }
+
+    /* ------------------------------------------------------------------ indicators */
+    .note {
+      font-size: 11px;
+      line-height: 1.55;
+      color: var(--muted);
+      background: rgba(55,182,255,0.07);
+      border: 1px solid rgba(55,182,255,0.16);
+      border-radius: var(--radius-sm);
+      padding: 9px 11px;
+      margin-bottom: 12px;
+    }
+    .note[hidden] { display: none; }
+
+    .indicators { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .indicator {
+      padding: 11px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.008));
+      border-left: 3px solid var(--line-strong);
+    }
+    .indicator[data-cat="water"] { border-left-color: var(--water); }
+    .indicator[data-cat="minerals"] { border-left-color: var(--mineral); }
+    .indicator[data-cat="soil"] { border-left-color: var(--soil); }
+    .indicator[data-cat="safety"] { border-left-color: var(--teal); }
+
+    .indicator__top {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 8px;
+    }
+    .indicator__label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.8px; text-transform: uppercase;
+      color: var(--muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .indicator__value {
+      font-family: var(--mono);
+      font-size: 23px; font-weight: 500;
+      line-height: 1;
+      letter-spacing: -0.5px;
+    }
+    .indicator__value small { font-size: 10px; color: var(--dim); font-family: 'Inter', sans-serif; }
+    .indicator__meter {
+      height: 3px; border-radius: 999px;
+      background: #1a2940;
+      margin-top: 9px;
+      overflow: hidden;
+    }
+    .indicator__meter span {
+      display: block; height: 100%; width: 0;
+      border-radius: 999px;
+      background: var(--line-strong);
+      transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .indicator[data-cat="water"] .indicator__meter span { background: var(--water); }
+    .indicator[data-cat="minerals"] .indicator__meter span { background: var(--mineral); }
+    .indicator[data-cat="soil"] .indicator__meter span { background: var(--soil); }
+    .indicator[data-cat="safety"] .indicator__meter span { background: var(--teal); }
+
+    .tag {
+      margin-left: auto;
+      font-size: 9.5px; font-weight: 700;
+      letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .tag--high { background: rgba(52,211,153,0.16); color: #6ee7b7; }
+    .tag--mid { background: rgba(251,191,36,0.16); color: #fcd34d; }
+    .tag--low { background: rgba(251,113,133,0.16); color: #fda4af; }
+
+    /* ------------------------------------------------------------------ attribute table */
+    .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      max-height: 236px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #26374f transparent;
+    }
+    .table-wrap::-webkit-scrollbar { width: 8px; }
+    .table-wrap::-webkit-scrollbar-thumb { background: #26374f; border-radius: 999px; }
+
+    .attr-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    .attr-table thead th {
+      position: sticky; top: 0;
+      background: var(--panel-raised);
+      color: var(--dim);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    .attr-table tbody td {
+      padding: 7px 8px;
+      border-bottom: 1px solid rgba(29,44,66,0.55);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .attr-table tbody tr:last-child td { border-bottom: 0; }
+    .attr-table tbody tr { cursor: pointer; transition: background 0.12s; }
+    .attr-table tbody tr:hover { background: rgba(55,182,255,0.07); }
+    .attr-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+    .attr-table .num { font-family: var(--mono); font-size: 10.5px; }
+    .attr-table .rank {
+      font-family: var(--mono);
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .attr-table .rank--mineral { color: var(--mineral); }
+    .attr-table .rank--soil { color: var(--soil); }
+    .attr-table .rank--safety { color: var(--teal); }
+
+    .attr-table .empty-row td {
+      text-align: center;
+      color: var(--dim);
+      font-size: 11px;
+      padding: 18px 10px;
+      white-space: normal;
+      cursor: default;
+    }
+    .attr-table .empty-row:hover { background: transparent; }
+
+    /* ------------------------------------------------------------------ exports */
+    .exports { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+
+    .export {
+      display: flex; align-items: center; gap: 7px;
+      padding: 9px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: var(--panel-sunken);
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .export:hover { border-color: var(--accent); color: var(--text); background: #102033; }
+    .export svg { opacity: 0.7; flex: 0 0 auto; }
+    .export--wide { grid-column: span 2; }
+    .export[aria-disabled="true"] {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    /* ------------------------------------------------------------------ status bar */
+    .status-bar {
+      height: var(--status-h);
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 14px;
+      background: #0a1422;
+      border-top: 1px solid var(--line);
+      font-size: 10.5px;
+      color: var(--dim);
+      z-index: 1200;
+      overflow: hidden;
+    }
+    .status-bar > span {
+      display: inline-flex; align-items: center; gap: 6px;
+      white-space: nowrap;
+    }
+    .status-bar .mono { font-family: var(--mono); color: var(--muted); }
+    .status-bar .spacer { flex: 1 1 auto; }
+    .status-bar .dot-sep {
+      width: 1px; height: 12px; background: var(--line);
+    }
+    #status-job[data-state="running"] { color: #fcd34d; }
+    #status-job[data-state="done"] { color: #6ee7b7; }
+    #status-job[data-state="error"] { color: #fda4af; }
+
+    /* ------------------------------------------------------------------ responsive */
+    @media (max-width: 1180px) {
+      .workspace { grid-template-columns: 250px minmax(0, 1fr) 360px; }
+      .workspace.is-left-collapsed { grid-template-columns: 0 minmax(0, 1fr) 360px; }
+      .workspace.is-right-collapsed { grid-template-columns: 250px minmax(0, 1fr) 0; }
+    }
+
+    @media (max-width: 980px) {
+      body { overflow: auto; height: auto; }
+      .app-bar { flex-wrap: wrap; height: auto; padding: 10px 12px; gap: 10px; }
+      .project-chip { display: none; }
+      .toolbar { width: 100%; margin-left: 0; }
+      .app-bar__right { display: none; }
+      .workspace,
+      .workspace.is-left-collapsed,
+      .workspace.is-right-collapsed,
+      .workspace.is-left-collapsed.is-right-collapsed {
+        display: flex;
+        flex-direction: column;
+        grid-template-columns: none;
+      }
+      .panel--left, .panel--right {
+        display: flex !important;
+        width: 100%;
+        border-left: 0; border-right: 0;
+        border-top: 1px solid var(--line);
+      }
+      .panel--left { order: 3; }
+      .panel--right { order: 2; }
+      .panel__body { overflow: visible; }
+      .map-wrap { order: 1; height: 56vh; min-height: 320px; }
+      .status-bar { position: sticky; bottom: 0; height: auto; flex-wrap: wrap; padding: 7px 12px; gap: 10px; }
+      .status-bar .spacer { display: none; }
+      .table-wrap { max-height: 200px; }
+    }
+
+    @media (max-width: 560px) {
+      .field-row { grid-template-columns: 1fr; }
+      .indicators { grid-template-columns: 1fr; }
+      .exports { grid-template-columns: 1fr; }
+      .export--wide { grid-column: auto; }
+      .brand__org { display: none; }
+      .map-chips { gap: 4px; }
+      .chip { font-size: 10px; padding: 4px 8px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .spinner { animation-duration: 3s; }
-      .progress-bar { transition: none; }
-    }
-
-    /* Small screens: the sidebar used to be a fixed 440px column beside a map, which
-       left no usable map and clipped the form on any phone. */
-    @media (max-width: 900px) {
-      body {
-        height: auto;
-        overflow: auto;
-      }
-      header {
-        padding: 10px 14px;
-      }
-      .title-box p { display: none; }
-      .app-body {
-        flex-direction: column;
-        height: auto;
-      }
-      .sidebar {
-        width: 100%;
-        border-right: none;
-        border-bottom: 1px solid var(--border);
-        overflow: visible;
-      }
-      #map {
-        height: 62vh;
-        min-height: 340px;
-        flex: none;
-      }
-      .map-banner {
-        position: static;
-        margin: 10px 14px 0;
-        max-width: none;
-        transform: none;
-      }
-      .app-body { position: static; }
-    }
-
-    @media (max-width: 420px) {
-      .form-row { grid-template-columns: 1fr; }
-      .actions-grid { grid-template-columns: 1fr; }
-      .btn-action.featured { grid-column: auto; }
+      * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Top App Navigation -->
-  <header>
-    <div class="brand-group">
-      <div class="logo-badge">SITESURVEYOR AI</div>
-      <div class="title-box">
-        <h1>Digital Earth Africa Sandbox</h1>
-        <p>Screening-Level Earth Observation &amp; Geospatial Intelligence &bull; Eineva Labs</p>
+  <a class="skip-link" href="#analysis-panel">Skip to survey controls</a>
+
+  <!-- ============================================================ app bar -->
+  <header class="app-bar">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#37b6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="#23d3c4" stroke="none"/>
+        </svg>
+      </div>
+      <div class="brand__text">
+        <div class="brand__name">SiteSurveyor AI</div>
+        <div class="brand__org">Eineva Labs</div>
       </div>
     </div>
-    <div class="header-actions">
-      <div class="badge-status">
-        <div class="dot" aria-hidden="true"></div>
-        <span>DE Africa WCS 2.1.0 &bull; 30 m grid</span>
-      </div>
-      <a href="/docs" target="_blank" rel="noopener" class="nav-btn">API Docs</a>
-      <a href="/api/report" target="_blank" rel="noopener" class="nav-btn" style="background:#0284c7;">View HTML Dossier</a>
+
+    <span class="project-chip"><i aria-hidden="true"></i> Digital Earth Africa &middot; WCS 2.1.0</span>
+
+    <div class="toolbar" role="toolbar" aria-label="Workspace actions">
+      <button type="button" class="tool tool--primary" id="btn-run-toolbar">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        Run survey
+      </button>
+      <button type="button" class="tool" id="btn-reset">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+        Reset view
+      </button>
+      <button type="button" class="tool" id="btn-refresh">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        Reload results
+      </button>
+      <a class="tool tool--ghost" href="/docs" target="_blank" rel="noopener">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5V6a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M8 8h8"/></svg>
+        API
+      </a>
+      <a class="tool tool--ghost" href="/api/report" target="_blank" rel="noopener">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Dossier
+      </a>
+    </div>
+
+    <div class="app-bar__right">
+      <span class="engine-pill" id="engine-pill" data-state="ready">
+        <i aria-hidden="true"></i><span id="engine-text">Engine ready</span>
+      </span>
     </div>
   </header>
 
-  <!-- Main View -->
-  <div class="app-body">
+  <!-- ============================================================ workspace -->
+  <main class="workspace" id="workspace">
 
-    <!-- Sidebar Control Panel -->
-    <div class="sidebar">
-
-      <!-- Coordinate Picker & Configuration -->
-      <form class="panel-section" id="survey-form" novalidate>
-        <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-          Target AOI &amp; Siting Parameters
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="lat">Latitude (°)</label>
-            <input type="number" step="0.00001" min="-90" max="90" inputmode="decimal" id="lat" class="input-control" value="-19.50487">
-          </div>
-          <div class="form-group">
-            <label for="lon">Longitude (°)</label>
-            <input type="number" step="0.00001" min="-180" max="180" inputmode="decimal" id="lon" class="input-control" value="29.84598">
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="client">Client / Property Name</label>
-          <input type="text" id="client" class="input-control" maxlength="120" autocomplete="off" value="Site Survey">
-        </div>
-
-        <div class="form-group">
-          <label for="address">Location / Address Description</label>
-          <input type="text" id="address" class="input-control" maxlength="240" autocomplete="off" value="Property location not specified">
-        </div>
-
-        <div class="form-group">
-          <label for="half-deg">Survey radius (half-width)</label>
-          <select id="half-deg" class="input-control">
-            <option value="0.045">≈ 5 km — single plot</option>
-            <option value="0.12" selected>≈ 13 km — farm / claim (default)</option>
-            <option value="0.23">≈ 25 km — district</option>
-            <option value="0.45">≈ 50 km — regional (slow)</option>
-          </select>
-          <p class="field-hint">Every layer is analysed on a 30 m grid inside this box. Larger boxes download more imagery and take longer.</p>
-        </div>
-
-        <fieldset class="form-group" style="border:0;">
-          <legend class="field-hint" style="font-weight:600; color:var(--text-muted); font-size:12px; margin-bottom:6px;">Survey categories</legend>
-          <div class="category-pills">
-            <label><input type="checkbox" id="cat-water" class="pill-checkbox" checked><span class="pill-label">Water</span></label>
-            <label><input type="checkbox" id="cat-minerals" class="pill-checkbox" checked><span class="pill-label">Minerals</span></label>
-            <label><input type="checkbox" id="cat-soil" class="pill-checkbox" checked><span class="pill-label">Soil</span></label>
-            <label><input type="checkbox" id="cat-hazard" class="pill-checkbox" checked><span class="pill-label">Hazard</span></label>
-          </div>
-        </fieldset>
-
-        <button type="submit" id="btn-run" class="btn-submit">
-          <span id="btn-text">Execute Screening Survey</span>
-        </button>
-
-        <div class="progress" id="progress" role="progressbar" aria-labelledby="progress-stage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-          <div class="progress-bar" id="progress-bar"></div>
-        </div>
-        <p class="progress-stage" id="progress-stage" role="status" aria-live="polite"></p>
-
-        <div class="error-region" id="error-region" role="alert" hidden></div>
-      </form>
-
-      <!-- Live Executive Scorecard -->
-      <div class="panel-section">
-        <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-          Executive Target Scorecard
-        </div>
-
-        <p class="results-note" id="results-note">No survey has run in this session. Scores appear here when a survey finishes.</p>
-
-        <div class="scorecard-grid" id="scorecard" aria-live="polite">
-          <div class="score-card water">
-            <div class="card-title">Groundwater</div>
-            <div class="card-score" id="score-water">—</div>
-            <span class="card-badge badge-na" id="badge-water">Not run</span>
-          </div>
-
-          <div class="score-card minerals">
-            <div class="card-title">Minerals</div>
-            <div class="card-score" id="score-minerals">—</div>
-            <span class="card-badge badge-na" id="badge-minerals">Not run</span>
-          </div>
-
-          <div class="score-card soil">
-            <div class="card-title">Soil Capability</div>
-            <div class="card-score" id="score-soil">—</div>
-            <span class="card-badge badge-na" id="badge-soil">Not run</span>
-          </div>
-
-          <div class="score-card hazard">
-            <div class="card-title">Site Safety</div>
-            <div class="card-score" id="score-safety">—</div>
-            <span class="card-badge badge-na" id="badge-safety">Not run</span>
-          </div>
+    <!-- contents pane -->
+    <aside class="panel panel--left" aria-label="Map contents">
+      <div class="panel__header">
+        <span class="panel__title">Contents</span>
+        <div class="panel__actions">
+          <button type="button" class="icon-btn" id="toggle-left" aria-expanded="true" aria-controls="contents-body" title="Collapse contents">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- Actionable Candidate Sites -->
-      <div class="panel-section" style="flex:1;">
-        <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-          Ranked Siting Candidates
-        </div>
+      <div class="panel__body" id="contents-body">
+        <section class="block">
+          <h2 class="block__title">Layers</h2>
+          <ul class="layer-list">
+            <li><label class="layer"><input type="checkbox" id="lyr-aoi" checked><span class="swatch swatch--aoi" aria-hidden="true"></span>Survey extent (AOI)</label></li>
+            <li><label class="layer"><input type="checkbox" id="lyr-candidates" checked><span class="swatch swatch--cand" aria-hidden="true"></span>Candidate sites</label></li>
+          </ul>
+        </section>
 
-        <div class="candidates-list" id="candidates-container" role="list">
-          <p class="cand-empty">Click the map or run a survey to rank candidate drilling sites and land zones.</p>
+        <section class="block">
+          <h2 class="block__title">Basemap</h2>
+          <ul class="layer-list">
+            <li><label class="layer"><input type="radio" name="basemap" id="lyr-satellite" value="satellite" checked><span class="swatch" style="background:linear-gradient(135deg,#1f4735,#2f6b4f)" aria-hidden="true"></span>Satellite imagery</label></li>
+            <li><label class="layer"><input type="radio" name="basemap" id="lyr-street" value="street"><span class="swatch" style="background:linear-gradient(135deg,#2c3b52,#4a5c76)" aria-hidden="true"></span>Street map</label></li>
+          </ul>
+        </section>
+
+        <section class="block">
+          <h2 class="block__title">Legend</h2>
+          <ul class="layer-list">
+            <li><span class="layer" style="cursor:default"><span class="swatch swatch--water" aria-hidden="true"></span>Borehole target</span></li>
+            <li><span class="layer" style="cursor:default"><span class="swatch swatch--mineral" aria-hidden="true"></span>Mineral target</span></li>
+            <li><span class="layer" style="cursor:default"><span class="swatch swatch--soil" aria-hidden="true"></span>Land zone</span></li>
+            <li><span class="layer" style="cursor:default"><span class="swatch swatch--hazard" aria-hidden="true"></span>Safe building site</span></li>
+          </ul>
+          <div class="legend-bands" aria-hidden="true">
+            <span class="band-low">0–49</span>
+            <span class="band-mid">50–74</span>
+            <span class="band-high">75–100</span>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2 class="block__title">Survey snapshot</h2>
+          <dl class="kv">
+            <div><dt>Target</dt><dd id="snap-target">—</dd></div>
+            <div><dt>CRS</dt><dd id="snap-crs">—</dd></div>
+            <div><dt>Grid</dt><dd>30 m · MCDA</dd></div>
+            <div><dt>Source</dt><dd id="snap-source">No survey yet</dd></div>
+            <div><dt>Basis</dt><dd id="snap-basis">AOI percentile</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
+
+    <!-- map -->
+    <section class="map-wrap" aria-label="Map canvas">
+      <div id="map" role="region" aria-label="Satellite map of the survey area"></div>
+
+      <div class="map-chips">
+        <span class="chip chip--accent">AOI <b id="banner-aoi">19.5049°S, 29.8460°E</b></span>
+        <span class="chip">CRS <b id="banner-crs">UTM 35S · EPSG:32735</b></span>
+        <span class="chip">Imagery <b id="banner-imagery">GeoMAD · Landsat 30 m</b></span>
+      </div>
+
+      <div class="map-hint" id="map-hint">Click the map to move the target pin</div>
+    </section>
+
+    <!-- analysis pane -->
+    <aside class="panel panel--right" aria-label="Analysis">
+      <div class="panel__header">
+        <span class="panel__title">Analysis</span>
+        <div class="panel__actions">
+          <button type="button" class="icon-btn" id="toggle-right" aria-expanded="true" aria-controls="analysis-panel" title="Collapse analysis">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- Deliverables & Exports -->
-      <div class="panel-section">
-        <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export Deliverables
-        </div>
-        <div class="actions-grid">
-          <a href="/api/report" target="_blank" rel="noopener" class="btn-action featured" data-deliverable="html_report">
-            <span>Executive HTML Dossier</span>
-          </a>
-          <a href="/api/dossier" target="_blank" rel="noopener" class="btn-action" data-deliverable="master_json_dossier">
-            <span>Master JSON</span>
-          </a>
-          <a href="/outputs/candidate_borehole_sites.kmz" download class="btn-action" data-deliverable="boreholes_kmz">
-            <span>Boreholes KMZ</span>
-          </a>
-          <a href="/outputs/candidate_mineral_targets.kmz" download class="btn-action" data-deliverable="minerals_kmz">
-            <span>Minerals KMZ</span>
-          </a>
-          <a href="/outputs/candidate_land_zones.kmz" download class="btn-action" data-deliverable="soil_kmz">
-            <span>Soil Zones KMZ</span>
-          </a>
-          <a href="/outputs/safest_buildable_sites.kmz" download class="btn-action" data-deliverable="safest_sites_kmz">
-            <span>Safety Sites KMZ</span>
-          </a>
-        </div>
-        <p class="field-hint" id="downloads-note">Unavailable files are shown greyed out; they are produced by a completed survey.</p>
+      <div class="panel__body" id="analysis-panel">
+
+        <form class="block" id="survey-form" novalidate>
+          <h2 class="block__title">Site parameters</h2>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field__label" for="lat">Latitude</label>
+              <input class="input input--mono" type="number" step="0.00001" min="-90" max="90" inputmode="decimal" id="lat" value="-19.50487">
+            </div>
+            <div class="field">
+              <label class="field__label" for="lon">Longitude</label>
+              <input class="input input--mono" type="number" step="0.00001" min="-180" max="180" inputmode="decimal" id="lon" value="29.84598">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="client">Client / property</label>
+            <input class="input" type="text" id="client" maxlength="120" autocomplete="off" value="Site Survey">
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="address">Location description</label>
+            <input class="input" type="text" id="address" maxlength="240" autocomplete="off" value="Property location not specified">
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="half-deg">Survey extent</label>
+            <select class="select" id="half-deg">
+              <option value="0.045">≈ 5 km · single plot</option>
+              <option value="0.12" selected>≈ 13 km · farm or claim</option>
+              <option value="0.23">≈ 25 km · district</option>
+              <option value="0.45">≈ 50 km · regional (slow)</option>
+            </select>
+          </div>
+
+          <fieldset class="field" style="border:0;">
+            <legend class="field__label">Categories</legend>
+            <div class="segmented">
+              <label><input type="checkbox" id="cat-water" checked><span>Water</span></label>
+              <label><input type="checkbox" id="cat-minerals" checked><span>Minerals</span></label>
+              <label><input type="checkbox" id="cat-soil" checked><span>Soil</span></label>
+              <label><input type="checkbox" id="cat-hazard" checked><span>Hazard</span></label>
+            </div>
+          </fieldset>
+
+          <button type="submit" class="run" id="btn-run">
+            <span id="btn-icon-wrap" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </span>
+            <span id="btn-text">Run screening survey</span>
+          </button>
+
+          <div class="progress" id="progress" role="progressbar" aria-labelledby="progress-stage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div class="progress__bar" id="progress-bar"></div>
+          </div>
+          <p class="progress-stage" id="progress-stage" role="status" aria-live="polite"></p>
+
+          <div class="alert" id="error-region" role="alert" hidden></div>
+        </form>
+
+        <section class="block">
+          <h2 class="block__title">
+            Indicators
+            <span class="block__count" id="indicators-count">0 / 4</span>
+          </h2>
+
+          <p class="note" id="results-note">No survey has run in this session. Indicators populate when a survey finishes.</p>
+
+          <div class="indicators" id="scorecard" aria-live="polite">
+            <article class="indicator" data-cat="water">
+              <div class="indicator__top"><span class="indicator__label">Groundwater</span><span class="tag" id="badge-water">Not run</span></div>
+              <div class="indicator__value" id="score-water">—</div>
+              <div class="indicator__meter"><span id="meter-water"></span></div>
+            </article>
+
+            <article class="indicator" data-cat="minerals">
+              <div class="indicator__top"><span class="indicator__label">Minerals</span><span class="tag" id="badge-minerals">Not run</span></div>
+              <div class="indicator__value" id="score-minerals">—</div>
+              <div class="indicator__meter"><span id="meter-minerals"></span></div>
+            </article>
+
+            <article class="indicator" data-cat="soil">
+              <div class="indicator__top"><span class="indicator__label">Soil capability</span><span class="tag" id="badge-soil">Not run</span></div>
+              <div class="indicator__value" id="score-soil">—</div>
+              <div class="indicator__meter"><span id="meter-soil"></span></div>
+            </article>
+
+            <article class="indicator" data-cat="safety">
+              <div class="indicator__top"><span class="indicator__label">Site safety</span><span class="tag" id="badge-safety">Not run</span></div>
+              <div class="indicator__value" id="score-safety">—</div>
+              <div class="indicator__meter"><span id="meter-safety"></span></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2 class="block__title">
+            Candidate attributes
+            <span class="block__count" id="cand-count">0</span>
+          </h2>
+
+          <div class="table-wrap">
+            <table class="attr-table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Score</th>
+                  <th scope="col">Dist km</th>
+                  <th scope="col">Lat</th>
+                  <th scope="col">Lon</th>
+                </tr>
+              </thead>
+              <tbody id="candidates-body">
+                <tr class="empty-row"><td colspan="6">No candidates yet. Run a survey to rank field-verification sites.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2 class="block__title">Exports</h2>
+          <div class="exports">
+            <a class="export export--wide" href="/api/report" target="_blank" rel="noopener" data-deliverable="html_report">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Executive HTML dossier
+            </a>
+            <a class="export" href="/api/dossier" target="_blank" rel="noopener" data-deliverable="master_json_dossier">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2"/><path d="M16 3h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-2"/></svg>
+              Master JSON
+            </a>
+            <a class="export" href="/outputs/candidate_borehole_sites.kmz" download data-deliverable="boreholes_kmz">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              Boreholes KMZ
+            </a>
+            <a class="export" href="/outputs/candidate_mineral_targets.kmz" download data-deliverable="minerals_kmz">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              Minerals KMZ
+            </a>
+            <a class="export" href="/outputs/candidate_land_zones.kmz" download data-deliverable="soil_kmz">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              Land zones KMZ
+            </a>
+            <a class="export" href="/outputs/safest_buildable_sites.kmz" download data-deliverable="safest_sites_kmz">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              Safe sites KMZ
+            </a>
+          </div>
+          <p class="hint" id="downloads-note">Files are produced by a completed survey; missing ones are disabled rather than left as dead links.</p>
+        </section>
       </div>
+    </aside>
+  </main>
 
-      <!-- Legal Disclaimer -->
-      <div class="disclaimer">
-        Screening-level Earth observation model only. Scores are relative percentile ranks within the chosen AOI, not absolute measurements, and are not comparable between surveys. Ground geophysics (VES/ERT) and geotechnical testing are required before drilling or excavation.
-      </div>
-
-    </div>
-
-    <!-- Right Map Viewport -->
-    <div id="map" role="region" aria-label="Satellite map of the survey area"></div>
-
-    <!-- Floating Top Info Banner -->
-    <div class="map-banner" id="map-banner">
-      <span>AOI: <strong id="banner-aoi">19.5049°S, 29.8460°E</strong></span>
-      <span>CRS: <strong id="banner-crs">UTM Zone 35S (EPSG:32735)</strong></span>
-      <span>Imagery: <strong id="banner-imagery">DE Africa GeoMAD &amp; Landsat 30 m</strong></span>
-    </div>
-
-  </div>
+  <!-- ============================================================ status bar -->
+  <footer class="status-bar">
+    <span><span class="mono" id="status-coords">—</span></span>
+    <span class="dot-sep" aria-hidden="true"></span>
+    <span class="mono" id="status-crs">EPSG:32735</span>
+    <span class="dot-sep" aria-hidden="true"></span>
+    <span class="mono" id="status-scale">Zoom —</span>
+    <span class="dot-sep" aria-hidden="true"></span>
+    <span id="status-job" role="status" aria-live="polite" data-state="idle">Idle</span>
+    <span class="spacer"></span>
+    <span>Relative percentile scores · screening only</span>
+  </footer>
 
   <script>
     (function () {
       'use strict';
 
-      // Digital Earth Africa serves roughly this envelope. Checked here as well as on the
-      // server so an out-of-coverage pin fails instantly instead of after a download.
       var COVERAGE = { latMin: -56, latMax: 41, lonMin: -30, lonMax: 66 };
       var POLL_INTERVAL_MS = 2000;
-      var POLL_LIMIT = 900; // ~30 minutes
-
-      var CATEGORIES = [
-        { key: 'water', kind: 'Borehole', color: '#0284c7', prefix: 'B', action: 'Vertical Electrical Sounding (VES) resistivity verification' },
-        { key: 'minerals', kind: 'Mineral target', color: '#d97706', prefix: 'M', action: 'Ground mapping and soil geochemical sampling' },
-        { key: 'soil', kind: 'Land zone', color: '#16a34a', prefix: 'S', action: 'Soil profile test and pH analysis' },
-        { key: 'hazard', kind: 'Safe site', color: '#059669', prefix: 'H', action: 'Geotechnical foundation investigation' }
-      ];
-
+      var POLL_LIMIT = 900;
       var INITIAL = { lat: -19.50487, lon: 29.84598 };
 
+      var CATEGORIES = [
+        { key: 'water', kind: 'Borehole', color: '#38bdf8', prefix: 'B', rankClass: '' },
+        { key: 'minerals', kind: 'Mineral', color: '#f5a524', prefix: 'M', rankClass: 'rank--mineral' },
+        { key: 'soil', kind: 'Land zone', color: '#34d399', prefix: 'S', rankClass: 'rank--soil' },
+        { key: 'hazard', kind: 'Safe site', color: '#23d3c4', prefix: 'H', rankClass: 'rank--safety' }
+      ];
+
       var map = null;
+      var layers = { aoi: null, candidates: null, satellite: null, street: null };
       var targetMarker = null;
-      var candidateLayer = null;
-      var aoiLayer = null;
+      var lastTarget = null;
       var busy = false;
 
       function $(id) { return document.getElementById(id); }
-      function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+      function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
       function num(value) {
         return (typeof value === 'number' && Number.isFinite(value)) ? value : null;
       }
-
       function fmtScore(value) {
         var v = num(value);
         return v === null ? '—' : v.toFixed(1);
       }
-
       function fmtKm(value) {
         var v = num(value);
-        return v === null ? '—' : v.toFixed(2) + ' km';
+        return v === null ? '—' : v.toFixed(2);
       }
-
       function dms(value, positive, negative) {
         return Math.abs(value).toFixed(4) + '°' + (value >= 0 ? positive : negative);
       }
 
-      // ---------------------------------------------------------------- networking
+      /* -------------------------------------------------------------- networking */
       async function fetchJson(url, options, timeoutMs) {
         var controller = new AbortController();
         var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 30000);
@@ -912,21 +1198,29 @@
             err.requestId = detail && detail.request_id;
             throw err;
           }
-          if (!body) {
-            throw new Error('The server returned a response that was not JSON.');
-          }
+          if (!body) { throw new Error('The server returned a response that was not JSON.'); }
           return body;
         } catch (e) {
-          if (e.name === 'AbortError') {
-            throw new Error('The request timed out before the server answered.');
-          }
+          if (e.name === 'AbortError') { throw new Error('The request timed out before the server answered.'); }
           throw e;
         } finally {
           clearTimeout(timer);
         }
       }
 
-      // ---------------------------------------------------------------- UI state
+      /* -------------------------------------------------------------- chrome state */
+      function setEngine(state, text) {
+        var pill = $('engine-pill');
+        pill.setAttribute('data-state', state);
+        $('engine-text').textContent = text;
+      }
+
+      function setJobStatus(state, text) {
+        var el = $('status-job');
+        el.setAttribute('data-state', state);
+        el.textContent = text;
+      }
+
       function showError(title, message, hint, requestId) {
         var box = $('error-region');
         box.textContent = '';
@@ -942,16 +1236,17 @@
 
         if (hint) {
           var hintEl = document.createElement('div');
-          hintEl.className = 'error-hint';
+          hintEl.className = 'alert__hint';
           hintEl.textContent = hint;
           box.appendChild(hintEl);
         }
         if (requestId) {
           var idEl = document.createElement('div');
-          idEl.className = 'error-id';
+          idEl.className = 'alert__id';
           idEl.textContent = 'Reference: ' + requestId;
           box.appendChild(idEl);
         }
+        setEngine('error', 'Engine error');
       }
 
       function clearError() {
@@ -964,70 +1259,99 @@
         busy = value;
         var btn = $('btn-run');
         var label = $('btn-text');
+        var icon = $('btn-icon-wrap');
         btn.disabled = value;
         btn.setAttribute('aria-busy', value ? 'true' : 'false');
-        label.textContent = value ? 'Siting analysis running…' : 'Execute Screening Survey';
-      }
-
-      function setProgress(visible) {
-        $('progress').hidden = !visible;
-        if (!visible) {
-          $('progress-bar').style.width = '0%';
-          $('progress').setAttribute('aria-valuenow', '0');
+        $('btn-run-toolbar').disabled = value;
+        label.textContent = value ? 'Screening in progress…' : 'Run screening survey';
+        icon.textContent = '';
+        if (value) {
+          var spinner = document.createElement('span');
+          spinner.className = 'spinner';
+          icon.appendChild(spinner);
+        } else {
+          icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
         }
       }
 
       function updateProgress(percent, stage) {
         var pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
-        setProgress(true);
+        $('progress').hidden = false;
         $('progress-bar').style.width = pct + '%';
         $('progress').setAttribute('aria-valuenow', String(pct));
-        $('progress-stage').textContent = stage ? (stage + ' — ' + pct + '%') : (pct + '%');
+        var el = $('progress-stage');
+        el.textContent = '';
+        var label = document.createElement('span');
+        label.textContent = stage || 'Working';
+        var value = document.createElement('b');
+        value.textContent = pct + '%';
+        el.appendChild(label);
+        el.appendChild(value);
       }
 
-      function badgeFor(value) {
-        if (value === null) { return { cls: 'badge-na', text: 'Not run' }; }
-        if (value >= 75) { return { cls: 'badge-high', text: 'High' }; }
-        if (value >= 50) { return { cls: 'badge-mod', text: 'Moderate' }; }
-        return { cls: 'badge-low', text: 'Low' };
+      function hideProgress() {
+        $('progress').hidden = true;
+        $('progress-bar').style.width = '0%';
+        $('progress').setAttribute('aria-valuenow', '0');
       }
 
-      function setCard(scoreId, badgeId, value, serverClass) {
-        var scoreEl = $(scoreId);
-        var badgeEl = $(badgeId);
-        scoreEl.textContent = fmtScore(value);
-        if (num(value) !== null) {
-          var suffix = document.createElement('span');
-          suffix.textContent = ' /100';
-          scoreEl.appendChild(suffix);
+      /* -------------------------------------------------------------- indicators */
+      function tagFor(value) {
+        if (value === null) { return { cls: '', text: 'Not run' }; }
+        if (value >= 75) { return { cls: 'tag--high', text: 'High' }; }
+        if (value >= 50) { return { cls: 'tag--mid', text: 'Moderate' }; }
+        return { cls: 'tag--low', text: 'Low' };
+      }
+
+      function setIndicator(key, value, serverClass) {
+        var v = num(value);
+        var scoreEl = $('score-' + key);
+        scoreEl.textContent = fmtScore(v);
+        if (v !== null) {
+          var small = document.createElement('small');
+          small.textContent = ' /100';
+          scoreEl.appendChild(small);
         }
-        var badge = badgeFor(num(value));
-        badgeEl.textContent = (serverClass && String(serverClass)) || badge.text;
-        badgeEl.className = 'card-badge ' + badge.cls;
+        var tag = tagFor(v);
+        var tagEl = $('badge-' + key);
+        tagEl.textContent = (serverClass && String(serverClass)) || tag.text;
+        tagEl.className = 'tag' + (tag.cls ? ' ' + tag.cls : '');
+        $('meter-' + key).style.width = v === null ? '0%' : Math.max(3, Math.min(100, v)) + '%';
       }
 
-      // ---------------------------------------------------------------- map
+      function countIndicators(values) {
+        var filled = values.filter(function (v) { return num(v) !== null; }).length;
+        $('indicators-count').textContent = filled + ' / 4';
+      }
+
+      /* -------------------------------------------------------------- map */
       function initMap() {
         if (typeof L === 'undefined') {
-          showError('Map unavailable', 'The map library could not be loaded from its CDN. The survey form still works, but candidate pins cannot be drawn.');
+          showError('Map unavailable', 'The mapping library could not be loaded. The survey form still works, but pins cannot be drawn.');
           return;
         }
 
-        map = L.map('map', { zoomControl: true, maxZoom: 18 }).setView([INITIAL.lat, INITIAL.lon], 13);
+        map = L.map('map', { zoomControl: false, maxZoom: 18, attributionControl: true })
+          .setView([INITIAL.lat, INITIAL.lon], 13);
 
-        var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri, Earthstar Geographics, Digital Earth Africa',
+        layers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Imagery &copy; Esri, Earthstar Geographics',
           maxZoom: 18
         }).addTo(map);
 
-        var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        layers.street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
           maxZoom: 19
         });
 
-        L.control.layers({ 'Satellite (Esri Imagery)': satellite, 'Street Map (OpenStreetMap)': osm }, null, { position: 'bottomright' }).addTo(map);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        L.control.scale({ position: 'bottomleft', imperial: false, maxWidth: 110 }).addTo(map);
 
-        targetMarker = L.marker([INITIAL.lat, INITIAL.lon], { draggable: true, title: 'Target site', alt: 'Target site marker' }).addTo(map);
+        targetMarker = L.marker([INITIAL.lat, INITIAL.lon], {
+          draggable: true,
+          title: 'Target site',
+          alt: 'Target site marker'
+        }).addTo(map);
         targetMarker.bindPopup(targetPopup(INITIAL.lat, INITIAL.lon));
 
         targetMarker.on('dragend', function (event) {
@@ -1039,19 +1363,33 @@
           moveTarget(event.latlng.lat, event.latlng.lng);
         });
 
-        candidateLayer = L.layerGroup().addTo(map);
+        layers.candidates = L.layerGroup().addTo(map);
+
+        map.on('mousemove', function (event) {
+          $('status-coords').textContent = dms(event.latlng.lat, 'N', 'S') + '  ' + dms(event.latlng.lng, 'E', 'W');
+        });
+        map.on('mouseout', function () { $('status-coords').textContent = '—'; });
+        map.on('zoomend moveend', updateScale);
+        updateScale();
+      }
+
+      function updateScale() {
+        if (!map) { return; }
+        var lat = map.getCenter().lat;
+        var zoom = map.getZoom();
+        var mPerPx = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+        $('status-scale').textContent = 'Zoom ' + zoom + ' · ' + mPerPx.toFixed(mPerPx < 10 ? 1 : 0) + ' m/px';
       }
 
       function targetPopup(lat, lon) {
         var node = document.createElement('div');
         node.style.fontSize = '12px';
+        node.style.lineHeight = '1.5';
         var heading = document.createElement('b');
         heading.textContent = 'Target site';
         node.appendChild(heading);
         node.appendChild(document.createElement('br'));
-        node.appendChild(document.createTextNode('Lat: ' + lat.toFixed(5)));
-        node.appendChild(document.createElement('br'));
-        node.appendChild(document.createTextNode('Lon: ' + lon.toFixed(5)));
+        node.appendChild(document.createTextNode(lat.toFixed(5) + ', ' + lon.toFixed(5)));
         return node;
       }
 
@@ -1063,15 +1401,16 @@
           targetMarker.bindPopup(targetPopup(lat, lon)).openPopup();
         }
         $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
+        $('snap-target').textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+        $('map-hint').classList.add('is-hidden');
       }
 
       function pinIcon(color, text) {
         var wrap = document.createElement('div');
-        wrap.style.cssText = 'background-color:' + color + ';width:26px;height:26px;border-radius:50%;border:2px solid #fff;' +
-                             'box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;' +
-                             'color:#fff;font-weight:800;font-size:11px;';
+        wrap.className = 'pin';
+        wrap.style.background = color;
         wrap.textContent = text;
-        return L.divIcon({ className: 'custom-pin', html: wrap.outerHTML, iconSize: [26, 26], iconAnchor: [13, 13] });
+        return L.divIcon({ className: '', html: wrap.outerHTML, iconSize: [26, 26], iconAnchor: [13, 13] });
       }
 
       function applyTarget(target) {
@@ -1079,10 +1418,16 @@
         var lat = num(target.latitude);
         var lon = num(target.longitude);
         if (lat === null || lon === null) { return; }
+        lastTarget = target;
 
         $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
+        $('snap-target').textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
+
         if (target.crs) {
-          $('banner-crs').textContent = 'UTM Zone ' + (target.utm_zone || '') + ' (' + target.crs + ')';
+          var epsg = String(target.crs).replace('EPSG:', '');
+          $('banner-crs').textContent = 'UTM ' + (target.utm_zone || '') + ' · ' + target.crs;
+          $('snap-crs').textContent = 'EPSG:' + epsg;
+          $('status-crs').textContent = 'EPSG:' + epsg;
         }
 
         if (!map) { return; }
@@ -1091,23 +1436,22 @@
         var bbox = Array.isArray(target.bbox_wgs84) ? target.bbox_wgs84 : null;
         if (bbox && bbox.length === 4) {
           var bounds = [[bbox[1], bbox[0]], [bbox[3], bbox[2]]];
-          if (aoiLayer) {
-            aoiLayer.setBounds(bounds);
+          if (layers.aoi) {
+            layers.aoi.setBounds(bounds);
           } else {
-            aoiLayer = L.rectangle(bounds, { color: '#38bdf8', weight: 2, fill: false, dashArray: '6 4' }).addTo(map);
+            layers.aoi = L.rectangle(bounds, {
+              color: '#37b6ff', weight: 1.6, fill: true, fillOpacity: 0.05, dashArray: '7 5'
+            });
+            if ($('lyr-aoi').checked) { layers.aoi.addTo(map); }
           }
-          map.fitBounds(bounds, { padding: [30, 30] });
+          map.fitBounds(bounds, { padding: [34, 34] });
         } else {
           map.flyTo([lat, lon], 13);
         }
+        updateScale();
       }
 
-      function clearCandidates() {
-        if (candidateLayer) { candidateLayer.clearLayers(); }
-        var container = $('candidates-container');
-        container.textContent = '';
-      }
-
+      /* -------------------------------------------------------------- candidates */
       function collectCandidates(data) {
         var raw = data.candidates || (data.categories ? {
           water: (data.categories.water || {}).candidate_sites || [],
@@ -1137,64 +1481,84 @@
       }
 
       function renderCandidates(list) {
-        clearCandidates();
-        var container = $('candidates-container');
+        var body = $('candidates-body');
+        body.textContent = '';
+
+        if (layers.candidates) { layers.candidates.clearLayers(); }
+        $('cand-count').textContent = String(list.length);
 
         if (!list.length) {
-          var empty = document.createElement('p');
-          empty.className = 'cand-empty';
-          empty.textContent = 'No candidates were returned for this survey. Open the executive dossier for the full maps and caveats.';
-          container.appendChild(empty);
+          var emptyRow = document.createElement('tr');
+          emptyRow.className = 'empty-row';
+          var emptyCell = document.createElement('td');
+          emptyCell.colSpan = 6;
+          emptyCell.textContent = 'No candidates were returned for this survey. Open the dossier for full maps and caveats.';
+          emptyRow.appendChild(emptyCell);
+          body.appendChild(emptyRow);
           return;
         }
 
         list.forEach(function (cand) {
-          var item = document.createElement('button');
-          item.type = 'button';
-          item.className = 'cand-item';
-          item.setAttribute('role', 'listitem');
+          var row = document.createElement('tr');
+          row.tabIndex = 0;
+          row.setAttribute('role', 'button');
+          row.setAttribute('aria-label', cand.category.kind + ' ' + cand.rank + ', score ' + fmtScore(cand.score));
 
-          var rank = document.createElement('span');
-          rank.className = 'cand-rank';
-          rank.style.color = cand.category.color;
-          rank.textContent = cand.rank;
+          var rankCell = document.createElement('td');
+          rankCell.className = 'rank ' + cand.category.rankClass;
+          rankCell.textContent = cand.rank;
 
-          var info = document.createElement('span');
-          info.className = 'cand-info';
-          var name = document.createElement('span');
-          name.className = 'cand-name';
-          name.textContent = cand.category.kind + ' (' + fmtKm(cand.dist) + ')';
-          var coords = document.createElement('span');
-          coords.className = 'cand-coords';
-          coords.textContent = cand.lat.toFixed(4) + ', ' + cand.lon.toFixed(4);
-          info.appendChild(name);
-          info.appendChild(document.createElement('br'));
-          info.appendChild(coords);
+          var typeCell = document.createElement('td');
+          typeCell.textContent = cand.category.kind;
 
-          var score = document.createElement('span');
-          score.className = 'cand-score';
-          score.textContent = fmtScore(cand.score) + ' pts';
+          var scoreCell = document.createElement('td');
+          scoreCell.className = 'num';
+          scoreCell.textContent = fmtScore(cand.score);
 
-          item.appendChild(rank);
-          item.appendChild(info);
-          item.appendChild(score);
+          var distCell = document.createElement('td');
+          distCell.className = 'num';
+          distCell.textContent = fmtKm(cand.dist);
 
-          if (map && candidateLayer) {
-            var marker = L.marker([cand.lat, cand.lon], { icon: pinIcon(cand.category.color, cand.rank), title: cand.category.kind + ' ' + cand.rank }).addTo(candidateLayer);
+          var latCell = document.createElement('td');
+          latCell.className = 'num';
+          latCell.textContent = cand.lat.toFixed(4);
+
+          var lonCell = document.createElement('td');
+          lonCell.className = 'num';
+          lonCell.textContent = cand.lon.toFixed(4);
+
+          [rankCell, typeCell, scoreCell, distCell, latCell, lonCell].forEach(function (c) { row.appendChild(c); });
+          body.appendChild(row);
+
+          var marker = null;
+          if (map && layers.candidates) {
+            marker = L.marker([cand.lat, cand.lon], {
+              icon: pinIcon(cand.category.color, cand.rank),
+              title: cand.category.kind + ' ' + cand.rank
+            }).addTo(layers.candidates);
             marker.bindPopup(candidatePopup(cand));
-            item.addEventListener('click', function () {
-              map.flyTo([cand.lat, cand.lon], 15);
-              marker.openPopup();
-            });
           }
 
-          container.appendChild(item);
+          function focusCandidate() {
+            if (map) {
+              map.flyTo([cand.lat, cand.lon], 15);
+              if (marker) { marker.openPopup(); }
+            }
+          }
+          row.addEventListener('click', focusCandidate);
+          row.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              focusCandidate();
+            }
+          });
         });
       }
 
       function candidatePopup(cand) {
         var node = document.createElement('div');
         node.style.fontSize = '12px';
+        node.style.lineHeight = '1.55';
 
         var heading = document.createElement('b');
         heading.style.color = cand.category.color;
@@ -1203,48 +1567,43 @@
         node.appendChild(document.createElement('br'));
 
         [['Score', fmtScore(cand.score) + ' / 100'],
-         ['Distance', fmtKm(cand.dist) + ' from target'],
+         ['Distance', fmtKm(cand.dist) + ' km from target'],
          ['GPS', cand.lat.toFixed(5) + ', ' + cand.lon.toFixed(5)]].forEach(function (pair) {
-          var strong = document.createElement('strong');
-          strong.textContent = pair[0] + ': ';
-          node.appendChild(strong);
+          var label = document.createElement('span');
+          label.style.color = '#93a7c0';
+          label.textContent = pair[0] + ' ';
+          node.appendChild(label);
           node.appendChild(document.createTextNode(pair[1]));
           node.appendChild(document.createElement('br'));
         });
 
-        var action = document.createElement('p');
-        action.style.cssText = 'margin-top:6px;font-size:11px;color:#475569;';
-        action.textContent = cand.category.action;
-        node.appendChild(action);
         return node;
       }
 
-      // ---------------------------------------------------------------- downloads
+      /* -------------------------------------------------------------- exports */
       function applyDownloads(urls) {
+        if (!urls) { return; }
         var links = document.querySelectorAll('[data-deliverable]');
         Array.prototype.forEach.call(links, function (link) {
           var key = link.getAttribute('data-deliverable');
-          if (!urls) { return; }
           if (urls[key]) {
             link.href = urls[key];
             link.removeAttribute('aria-disabled');
             link.removeAttribute('tabindex');
-            link.classList.remove('is-disabled');
           } else {
             link.removeAttribute('href');
             link.setAttribute('aria-disabled', 'true');
             link.setAttribute('tabindex', '-1');
-            link.classList.add('is-disabled');
           }
         });
 
         var disabled = document.querySelectorAll('[data-deliverable][aria-disabled="true"]').length;
         $('downloads-note').textContent = disabled
           ? 'Only the files this survey produced are enabled; greyed-out exports were not generated.'
-          : 'All exports below are ready for download.';
+          : 'All exports are ready for download.';
       }
 
-      // ---------------------------------------------------------------- results
+      /* -------------------------------------------------------------- results */
       function renderResults(data, options) {
         var opts = options || {};
         var scorecard = data.executive_scorecard || null;
@@ -1261,10 +1620,11 @@
         var soil = pick('soil_land');
         var hazard = pick('hazard_safety');
 
-        setCard('score-water', 'badge-water', num(water.cell_score), water.cell_class);
-        setCard('score-minerals', 'badge-minerals', num(minerals.cell_score), minerals.cell_class);
-        setCard('score-soil', 'badge-soil', num(soil.cell_score), soil.cell_class);
-        setCard('score-safety', 'badge-safety', num(hazard.safety_score), hazard.hazard_class);
+        setIndicator('water', water.cell_score, water.cell_class);
+        setIndicator('minerals', minerals.cell_score, minerals.cell_class);
+        setIndicator('soil', soil.cell_score, soil.cell_class);
+        setIndicator('safety', hazard.safety_score, hazard.hazard_class);
+        countIndicators([water.cell_score, minerals.cell_score, soil.cell_score, hazard.safety_score]);
 
         renderCandidates(collectCandidates(data));
 
@@ -1274,16 +1634,18 @@
           var when = '';
           if (data.generated_at) {
             var parsed = new Date(String(data.generated_at).replace(' ', 'T'));
-            if (!isNaN(parsed.getTime())) { when = ' (' + parsed.toLocaleString() + ')'; }
+            if (!isNaN(parsed.getTime())) { when = ' · ' + parsed.toLocaleString(); }
           }
-          note.textContent = 'Showing the most recently completed survey on this instance' + when +
+          note.textContent = 'Showing the most recent completed survey on this instance' + when +
             '. Run a survey for your own coordinate — this is not your target.';
+          $('snap-source').textContent = 'Previous survey';
         } else {
           note.textContent = 'Scores are percentile ranks within this AOI, not absolute measurements. Two surveys are not comparable.';
+          $('snap-source').textContent = 'This survey';
         }
       }
 
-      // ---------------------------------------------------------------- survey run
+      /* -------------------------------------------------------------- run */
       async function pollJob(jobId) {
         for (var attempt = 0; attempt < POLL_LIMIT; attempt++) {
           await sleep(POLL_INTERVAL_MS);
@@ -1296,12 +1658,13 @@
           if (job.status === 'failed') {
             var err = new Error((job.error && job.error.message) || 'The survey failed inside the engine.');
             err.requestId = job.error && job.error.request_id;
-            err.hint = 'Retry once. If it keeps failing, try a smaller survey radius.';
+            err.hint = 'Retry once. If it keeps failing, try a smaller survey extent.';
             throw err;
           }
           updateProgress(job.progress || 5, job.stage || 'Working');
+          setJobStatus('running', (job.stage || 'Working') + ' · ' + (job.progress || 0) + '%');
         }
-        throw new Error('The survey is still running after 30 minutes. It was left to finish server-side; reload the page later to see the latest dossier.');
+        throw new Error('The survey is still running after 30 minutes. It was left to finish server-side; reload results later.');
       }
 
       async function executeSurvey(event) {
@@ -1341,8 +1704,10 @@
         };
 
         setBusy(true);
+        setEngine('running', 'Survey running');
+        setJobStatus('running', 'Submitting survey');
         updateProgress(2, 'Submitting survey');
-        $('banner-imagery').textContent = 'DE Africa GeoMAD & Landsat 30 m';
+        $('map-hint').classList.add('is-hidden');
 
         try {
           var submitted = await fetchJson('/api/survey', {
@@ -1351,30 +1716,38 @@
             body: JSON.stringify(payload)
           }, 30000);
 
-          if (!submitted.job_id) {
-            throw new Error('The server accepted the survey but returned no job id.');
-          }
+          if (!submitted.job_id) { throw new Error('The server accepted the survey but returned no job id.'); }
 
           var result = await pollJob(submitted.job_id);
 
           applyTarget(result.target);
           renderResults(result, { source: 'survey' });
           applyDownloads(result.download_urls || {});
-          $('progress-stage').textContent = 'Survey complete.';
-          $('downloads-note').textContent = (result.deliverables_missing || []).length
-            ? 'Some exports were not produced by this run and are greyed out.'
-            : 'All exports are ready.';
-          setTimeout(function () { setProgress(false); }, 2500);
+          updateProgress(100, 'Complete');
+          setJobStatus('done', 'Survey complete');
+          setEngine('ready', 'Engine ready');
+          $('snap-basis').textContent = 'AOI percentile';
+          setTimeout(hideProgress, 2600);
         } catch (err) {
           showError('Survey failed', err.message, err.hint, err.requestId);
-          $('progress-stage').textContent = 'Survey stopped.';
-          setProgress(false);
+          setJobStatus('error', 'Survey failed');
+          hideProgress();
         } finally {
           setBusy(false);
         }
       }
 
-      // ---------------------------------------------------------------- boot
+      /* -------------------------------------------------------------- boot */
+      function resetView() {
+        if (!map) { return; }
+        if (lastTarget && Array.isArray(lastTarget.bbox_wgs84)) {
+          var b = lastTarget.bbox_wgs84;
+          map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [34, 34] });
+        } else {
+          map.flyTo([INITIAL.lat, INITIAL.lon], 13);
+        }
+      }
+
       async function preloadLastSurvey() {
         try {
           var dossier = await fetchJson('/api/dossier', {}, 20000);
@@ -1383,6 +1756,7 @@
           if (!anyLoaded) {
             $('results-note').hidden = false;
             $('results-note').textContent = 'No completed survey yet on this instance. Pick a coordinate and run one.';
+            $('snap-source').textContent = 'No survey yet';
             return;
           }
           renderResults(dossier, { source: 'dossier' });
@@ -1393,13 +1767,78 @@
             });
           }
         } catch (e) {
-          // A previous survey is optional; the form works without one.
+          // A previous survey is optional; the workspace works without one.
         }
       }
 
-      initMap();
-      $('survey-form').addEventListener('submit', executeSurvey);
-      preloadLastSurvey();
+      function wireLayers() {
+        $('lyr-aoi').addEventListener('change', function (event) {
+          if (!map || !layers.aoi) { return; }
+          if (event.target.checked) { layers.aoi.addTo(map); } else { map.removeLayer(layers.aoi); }
+        });
+
+        $('lyr-candidates').addEventListener('change', function (event) {
+          if (!map || !layers.candidates) { return; }
+          if (event.target.checked) { layers.candidates.addTo(map); } else { map.removeLayer(layers.candidates); }
+        });
+
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="basemap"]'), function (radio) {
+          radio.addEventListener('change', function (event) {
+            if (!map) { return; }
+            if (event.target.value === 'street') {
+              map.removeLayer(layers.satellite);
+              layers.street.addTo(map);
+            } else {
+              map.removeLayer(layers.street);
+              layers.satellite.addTo(map);
+            }
+          });
+        });
+      }
+
+      function wirePanels() {
+        var workspace = $('workspace');
+        var left = $('toggle-left');
+        var right = $('toggle-right');
+
+        left.addEventListener('click', function () {
+          var collapsed = workspace.classList.toggle('is-left-collapsed');
+          left.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          left.title = collapsed ? 'Show contents' : 'Collapse contents';
+          if (map) { setTimeout(function () { map.invalidateSize(); }, 220); }
+        });
+
+        right.addEventListener('click', function () {
+          var collapsed = workspace.classList.toggle('is-right-collapsed');
+          right.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          right.title = collapsed ? 'Show analysis' : 'Collapse analysis';
+          if (map) { setTimeout(function () { map.invalidateSize(); }, 220); }
+        });
+      }
+
+      function boot() {
+        initMap();
+        wireLayers();
+        wirePanels();
+
+        $('survey-form').addEventListener('submit', executeSurvey);
+        $('btn-run-toolbar').addEventListener('click', function () {
+          if ($('survey-form').requestSubmit) {
+            $('survey-form').requestSubmit();
+          } else {
+            executeSurvey();
+          }
+        });
+        $('btn-reset').addEventListener('click', resetView);
+        $('btn-refresh').addEventListener('click', preloadLastSurvey);
+
+        $('snap-target').textContent = INITIAL.lat.toFixed(4) + ', ' + INITIAL.lon.toFixed(4);
+        setJobStatus('idle', 'Idle');
+
+        preloadLastSurvey();
+      }
+
+      boot();
     })();
   </script>
 </body>
