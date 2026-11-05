@@ -53,9 +53,10 @@ ANALYST = "Eineva Labs"
 BRAND_COLOR = "#0b4f6c"
 CELL = 30.0  # metres
 
-# Map render buffers scale with the square of this, and at 200 the export stage alone
-# pushed the 512 MB instance over its limit. These maps are read on screen, not printed.
-MAP_DPI = int(os.getenv("MAP_DPI", "150"))
+# Map render buffers scale with the square of this: a mineral survey peaks at 582 MB of
+# process memory with maps at 200 dpi and 427 MB at 120, and the starter instance we deploy
+# on holds 512 MB. These maps are read on screen, not printed; raise this with the instance.
+MAP_DPI = int(os.getenv("MAP_DPI", "120"))
 
 # --- Water Model Weights (AHP) ---
 WATER_WEIGHTS = {

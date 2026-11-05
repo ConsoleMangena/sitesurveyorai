@@ -14,11 +14,9 @@ services:
       # pinned value, which would leave uvicorn listening somewhere the router never reaches.
       - key: GDAL_DISABLE_READDIR_ON_OPEN
         value: "EMPTY_DIR"
-      # Peak process memory is the map render buffer, which scales with this squared:
-      # a mineral survey peaks at 582 MB at 200 dpi and 427 MB at 120, against the
-      # starter plan's 512 MB. Raise it back toward 150 when the plan grows.
-      - key: MAP_DPI
-        value: "120"
+      # No MAP_DPI here: the export dpi that keeps a survey inside the starter plan's
+      # 512 MB is set once, as the code default in src/config.py, and this file is only
+      # read by blueprint deploys — services created with the CLI get no vars from it.
       - key: DE_AFRICA_TOKEN
         sync: false # Set your Digital Earth Africa API Key securely in Render Dashboard
       - key: ALLOWED_ORIGINS
