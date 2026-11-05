@@ -7,7 +7,10 @@ FROM python:3.11-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PORT=8000
+# Coverages are read as remote COGs; without this GDAL lists the whole S3 prefix
+# on every open, which turns each layer read into a multi-second stall.
+# PORT is deliberately not set here — the platform injects it at runtime.
+ENV GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

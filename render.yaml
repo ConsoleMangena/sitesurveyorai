@@ -10,8 +10,8 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: PORT
-        value: "8000"
+      # No PORT here on purpose: Render assigns the container port and overrides a
+      # pinned value, which would leave uvicorn listening somewhere the router never reaches.
       - key: GDAL_DISABLE_READDIR_ON_OPEN
         value: "EMPTY_DIR"
       - key: DE_AFRICA_TOKEN
