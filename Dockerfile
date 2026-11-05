@@ -49,6 +49,8 @@ RUN mkdir -p /app/data/raw /app/outputs
 # Import the app once during the build. A missing shared library or module otherwise
 # surfaces only as a restarting instance and a 502, with the traceback buried in runtime
 # logs; this turns it into a build failure that names the missing piece.
+COPY tools/ ./tools/
+RUN python tools/proj_doctor.py || true
 RUN python -c "import src.api; print('app imports clean')"
 
 EXPOSE 8000
