@@ -1,0 +1,19 @@
+# ==============================================================================
+# SiteSurveyor AI — Render Infrastructure as Code (render.yaml Blueprint)
+# ==============================================================================
+services:
+  - type: web
+    name: sitesurveyor-engine
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: GDAL_DISABLE_READDIR_ON_OPEN
+        value: "EMPTY_DIR"
+      - key: DE_AFRICA_TOKEN
+        sync: false # Set your Digital Earth Africa API Key securely in Render Dashboard
+

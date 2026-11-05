@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SiteSurveyor AI — Digital Earth Africa Geospatial Sandbox</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --primary: #0b4f6c;
+      --primary-dark: #08374c;
+      --primary-light: #e8f4f8;
+      --accent-water: #0284c7;
+      --accent-mineral: #d97706;
+      --accent-soil: #16a34a;
+      --accent-hazard: #dc2626;
+      --accent-safety: #059669;
+      --bg-dark: #0f172a;
+      --bg-card: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+      --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body {
+      background-color: #f8fafc;
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Header Bar */
+    header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: #ffffff;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--shadow-md);
+      z-index: 1000;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-badge {
+      background: #ffffff;
+      color: var(--primary);
+      font-weight: 900;
+      font-size: 16px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      letter-spacing: 0.5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
+    .title-box h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .title-box p {
+      font-size: 11px;
+      opacity: 0.85;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #e2e8f0;
+    }
+
+    .badge-status .dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .nav-btn {
+      background: rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      text-decoration: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+
+    .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* Main Layout */
+    .app-body {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 60px);
+      position: relative;
+    }
+
+    /* Left Control & Intelligence Sidebar */
+    .sidebar {
+      width: 440px;
+      background: #ffffff;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      z-index: 500;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .panel-section {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-heading {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--primary);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 5px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .input-control {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #f8fafc;
+      color: var(--text-main);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .input-control:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(11, 79, 108, 0.15);
+      background: #ffffff;
+    }
+
+    .category-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .pill-checkbox {
+      display: none;
+    }
+
+    .pill-label {
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: #f1f5f9;
+      color: #475569;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .pill-checkbox:checked + .pill-label {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+
+    .btn-submit {
+      width: 100%;
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 12px;
+      font-size: 13.5px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.2s, transform 0.1s;
+      box-shadow: 0 2px 6px rgba(11, 79, 108, 0.25);
+    }
+
+    .btn-submit:hover {
+      background: var(--primary-dark);
+    }
+
+    .btn-submit:active {
+      transform: translateY(1px);
+    }
+
+    .btn-submit:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    /* Scorecard Cards */
+    .scorecard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .score-card {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      border-left: 4px solid var(--primary);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .score-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .score-card.water { border-left-color: var(--accent-water); }
+    .score-card.minerals { border-left-color: var(--accent-mineral); }
+    .score-card.soil { border-left-color: var(--accent-soil); }
+    .score-card.hazard { border-left-color: var(--accent-safety); }
+
+    .card-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+
+    .card-score {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text-main);
+      line-height: 1;
+    }
+
+    .card-score span {
+      font-size: 11px;
+      font-weight: 500;
+      color: #94a3b8;
+    }
+
+    .card-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-top: 6px;
+      text-transform: uppercase;
+    }
+
+    .badge-high { background: #dcfce7; color: #15803d; }
+    .badge-mod  { background: #fef9c3; color: #a16207; }
+    .badge-low  { background: #fee2e2; color: #b91c1c; }
+
+    /* Candidates List */
+    .candidates-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .cand-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .cand-item:hover {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+
+    .cand-rank {
+      font-weight: 800;
+      color: var(--primary);
+      width: 24px;
+    }
+
+    .cand-info {
+      flex: 1;
+      padding: 0 8px;
+    }
+
+    .cand-coords {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: #475569;
+    }
+
+    .cand-score {
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--text-main);
+    }
+
+    /* Deliverables Bar */
+    .actions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 12px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: 6px;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      color: #334155;
+      transition: all 0.15s;
+    }
+
+    .btn-action:hover {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+
+    .btn-action.featured {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #0284c7;
+      grid-column: span 2;
+    }
+
+    .btn-action.featured:hover {
+      background: #0369a1;
+    }
+
+    /* Disclaimer */
+    .disclaimer {
+      font-size: 10.5px;
+      color: #94a3b8;
+      line-height: 1.4;
+      padding: 12px 20px;
+      background: #f8fafc;
+      font-style: italic;
+    }
+
+    /* Map Canvas */
+    #map {
+      flex: 1;
+      height: 100%;
+      background: #0f172a;
+    }
+
+    /* Map Overlay Banner */
+    .map-banner {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(8px);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 11.5px;
+      z-index: 1000;
+      box-shadow: var(--shadow-md);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .map-banner strong {
+      color: #38bdf8;
+    }
+
+    /* Loading Spinner */
+    .spinner {
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 2px solid #ffffff;
+      width: 14px;
+      height: 14px;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header>
+    <div class="brand-group">
+      <div class="logo-badge">SITESURVEYOR AI</div>
+      <div class="title-box">
+        <h1>Digital Earth Africa Sandbox</h1>
+        <p>Screening-Level Earth Observation & Geospatial Intelligence • Eineva Labs</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="badge-status">
+        <div class="dot"></div>
+        <span>DE Africa Sandbox Token Active (WCS 2.1.0)</span>
+      </div>
+      <a href="/docs" target="_blank" class="nav-btn">FastAPI Docs</a>
+      <a href="/api/report" target="_blank" class="nav-btn" style="background:#0284c7;">View HTML Dossier</a>
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <div class="app-body">
+    
+    <!-- Sidebar Control Panel -->
+    <div class="sidebar">
+      
+      <!-- Coordinate Picker & Configuration -->
+      <div class="panel-section">
+        <div class="section-heading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          Target AOI & Siting Parameters
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label>Latitude (°)</label>
+            <input type="number" step="0.00001" id="lat" class="input-control" value="-19.50487">
+          </div>
+          <div class="form-group">
+            <label>Longitude (°)</label>
+            <input type="number" step="0.00001" id="lon" class="input-control" value="29.84598">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Client / Property Name</label>
+          <input type="text" id="client" class="input-control" value="Thomas Mangena">
+        </div>
+
+        <div class="form-group">
+          <label>Location / Address Description</label>
+          <input type="text" id="address" class="input-control" value="05 Sekope Highlands, Gweru, Zimbabwe">
+        </div>
+
+        <div class="form-group">
+          <label>Survey Categories</label>
+          <div class="category-pills">
+            <label><input type="checkbox" id="cat-water" class="pill-checkbox" checked><span class="pill-label">Water</span></label>
+            <label><input type="checkbox" id="cat-minerals" class="pill-checkbox" checked><span class="pill-label">Minerals</span></label>
+            <label><input type="checkbox" id="cat-soil" class="pill-checkbox" checked><span class="pill-label">Soil</span></label>
+            <label><input type="checkbox" id="cat-hazard" class="pill-checkbox" checked><span class="pill-label">Hazard</span></label>
+          </div>
+        </div>
+
+        <button id="btn-run" class="btn-submit" onclick="executeSurvey()">
+          <span id="btn-text">Execute Screening Survey</span>
+        </button>
+      </div>
+
+      <!-- Live Executive Scorecard -->
+      <div class="panel-section">
+        <div class="section-heading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+          Executive Target Scorecard
+        </div>
+
+        <div class="scorecard-grid">
+          <div class="score-card water">
+            <div class="card-title">Groundwater</div>
+            <div class="card-score" id="score-water">58.0 <span>/100</span></div>
+            <span class="card-badge badge-mod" id="badge-water">Moderate</span>
+          </div>
+
+          <div class="score-card minerals">
+            <div class="card-title">Minerals</div>
+            <div class="card-score" id="score-minerals">42.0 <span>/100</span></div>
+            <span class="card-badge badge-low" id="badge-minerals">Low</span>
+          </div>
+
+          <div class="score-card soil">
+            <div class="card-title">Soil Capability</div>
+            <div class="card-score" id="score-soil">58.5 <span>/100</span></div>
+            <span class="card-badge badge-mod" id="badge-soil">Moderate</span>
+          </div>
+
+          <div class="score-card hazard">
+            <div class="card-title">Site Safety</div>
+            <div class="card-score" id="score-safety">55.6 <span>/100</span></div>
+            <span class="card-badge badge-mod" id="badge-safety">Moderate</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actionable Candidate Sites -->
+      <div class="panel-section" style="flex:1;">
+        <div class="section-heading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+          Ranked Siting Candidates
+        </div>
+
+        <div class="candidates-list" id="candidates-container">
+          <div style="font-size: 11.5px; color: #94a3b8; text-align: center; padding: 20px;">
+            Click on map or hit "Execute Screening Survey" to rank candidate drill sites and agricultural zones.
+          </div>
+        </div>
+      </div>
+
+      <!-- Deliverables & Exports -->
+      <div class="panel-section">
+        <div class="section-heading">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export Deliverables
+        </div>
+        <div class="actions-grid">
+          <a href="/api/report" target="_blank" class="btn-action featured">
+            <span>📄 Standalone HTML Dossier (18MB Self-Contained)</span>
+          </a>
+          <a href="/api/dossier" target="_blank" class="btn-action">
+            <span>📊 Master JSON</span>
+          </a>
+          <a href="/outputs/candidate_borehole_sites.kmz" download class="btn-action">
+            <span>📍 Boreholes KMZ</span>
+          </a>
+          <a href="/outputs/candidate_land_zones.kmz" download class="btn-action">
+            <span>🌱 Soil Zones KMZ</span>
+          </a>
+          <a href="/outputs/safest_buildable_sites.kmz" download class="btn-action">
+            <span>🛡️ Safety Sites KMZ</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Legal Disclaimer -->
+      <div class="disclaimer">
+        ⚠ Screening-level Earth observation model only. Ground geophysics (VES/ERT) & geotechnical testing required prior to drilling or excavation.
+      </div>
+
+    </div>
+
+    <!-- Right Map Viewport -->
+    <div id="map"></div>
+
+    <!-- Floating Top Info Banner -->
+    <div class="map-banner">
+      <span>AOI: <strong>Gweru, Zimbabwe (19.50°S, 29.85°E)</strong></span>
+      <span>CRS: <strong>UTM Zone 35S (EPSG:32735)</strong></span>
+      <span>Imagery: <strong>DE Africa GeoMAD & Landsat 30m</strong></span>
+    </div>
+
+  </div>
+
+  <script>
+    // Initialize Map
+    const initialLat = -19.50487;
+    const initialLon = 29.84598;
+
+    const map = L.map('map', {
+      zoomControl: true,
+      maxZoom: 18,
+    }).setView([initialLat, initialLon], 13);
+
+    // Basemap Layers
+    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri, Earthstar Geographics, Digital Earth Africa',
+      maxZoom: 18
+    }).addTo(map);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    });
+
+    const baseMaps = {
+      "Satellite (Esri Imagery)": esriSatellite,
+      "Street Map (OpenStreetMap)": osm
+    };
+    L.control.layers(baseMaps, null, { position: 'bottomright' }).addTo(map);
+
+    // Target Pin Marker
+    let targetMarker = L.marker([initialLat, initialLon], {
+      draggable: true,
+      title: "Client Target Site"
+    }).addTo(map);
+
+    targetMarker.bindPopup("<b>Client Property Target</b><br>Lat: " + initialLat + "<br>Lon: " + initialLon).openPopup();
+
+    targetMarker.on('dragend', function (e) {
+      const pos = e.target.getLatLng();
+      document.getElementById('lat').value = pos.lat.toFixed(5);
+      document.getElementById('lon').value = pos.lng.toFixed(5);
+      targetMarker.bindPopup("<b>Client Property Target</b><br>Lat: " + pos.lat.toFixed(5) + "<br>Lon: " + pos.lng.toFixed(5)).openPopup();
+    });
+
+    // Map Click Listener to re-position target marker
+    map.on('click', function(e) {
+      const lat = e.latlng.lat.toFixed(5);
+      const lon = e.latlng.lng.toFixed(5);
+      document.getElementById('lat').value = lat;
+      document.getElementById('lon').value = lon;
+      targetMarker.setLatLng(e.latlng);
+      targetMarker.bindPopup("<b>Target Site</b><br>Lat: " + lat + "<br>Lon: " + lon).openPopup();
+    });
+
+    // Marker Groups for Candidates
+    const candidateLayerGroup = L.layerGroup().addTo(map);
+
+    // Create colored pin icons
+    function createColorIcon(color, text) {
+      return L.divIcon({
+        className: 'custom-pin',
+        html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 11px;">${text}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+    }
+
+    // Survey Execution
+    async function executeSurvey() {
+      const lat = parseFloat(document.getElementById('lat').value);
+      const lon = parseFloat(document.getElementById('lon').value);
+      const client = document.getElementById('client').value;
+      const address = document.getElementById('address').value;
+
+      const categories = [];
+      if (document.getElementById('cat-water').checked) categories.push('water');
+      if (document.getElementById('cat-minerals').checked) categories.push('minerals');
+      if (document.getElementById('cat-soil').checked) categories.push('soil');
+      if (document.getElementById('cat-hazard').checked) categories.push('hazard');
+
+      const btn = document.getElementById('btn-run');
+      const btnText = document.getElementById('btn-text');
+      btn.disabled = true;
+      btnText.innerHTML = '<span class="spinner"></span> Siting Analysis Running...';
+
+      try {
+        const resp = await fetch('/api/survey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            latitude: lat,
+            longitude: lon,
+            categories: categories.length ? categories : ['all'],
+            client_name: client,
+            address: address
+          })
+        });
+
+        if (!resp.ok) {
+          throw new Error('Server returned HTTP ' + resp.status);
+        }
+
+        const data = await resp.json();
+        renderResults(data);
+      } catch (err) {
+        alert('Survey failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btnText.innerText = 'Execute Screening Survey';
+      }
+    }
+
+    function renderResults(data) {
+      candidateLayerGroup.clearLayers();
+      const container = document.getElementById('candidates-container');
+      container.innerHTML = '';
+
+      const sc = data.executive_scorecard || {};
+
+      // Groundwater Scorecard
+      if (sc.groundwater) {
+        document.getElementById('score-water').innerHTML = (sc.groundwater.cell_score || 0).toFixed(1) + ' <span>/100</span>';
+        document.getElementById('badge-water').innerText = sc.groundwater.cell_class || 'Moderate';
+      }
+
+      // Minerals Scorecard
+      if (sc.minerals) {
+        document.getElementById('score-minerals').innerHTML = (sc.minerals.cell_score || 0).toFixed(1) + ' <span>/100</span>';
+        document.getElementById('badge-minerals').innerText = sc.minerals.cell_class || 'Moderate';
+      }
+
+      // Soil Scorecard
+      if (sc.soil_land) {
+        document.getElementById('score-soil').innerHTML = (sc.soil_land.cell_score || 0).toFixed(1) + ' <span>/100</span>';
+        document.getElementById('badge-soil').innerText = sc.soil_land.cell_class || 'Moderate';
+      }
+
+      // Safety Scorecard
+      if (sc.hazard_safety) {
+        document.getElementById('score-safety').innerHTML = (sc.hazard_safety.safety_score || 0).toFixed(1) + ' <span>/100</span>';
+        document.getElementById('badge-safety').innerText = (sc.hazard_safety.hazard_class || 'Safe');
+      }
+
+      // Collect top candidates from categories
+      const allCands = [];
+
+      // Boreholes
+      const waterData = data.categories?.water;
+      if (waterData && waterData.candidate_sites) {
+        waterData.candidate_sites.forEach((c, idx) => {
+          allCands.push({
+            type: 'Borehole',
+            color: '#0284c7',
+            rank: 'B' + (idx + 1),
+            score: c.potential_score || c.score,
+            lat: c.latitude,
+            lon: c.longitude,
+            dist: c.distance_from_target_km || 0,
+            action: 'VES Resistivity Sounding verification required'
+          });
+        });
+      }
+
+      // Minerals
+      const minData = data.categories?.minerals;
+      if (minData && minData.candidate_targets) {
+        minData.candidate_targets.forEach((c, idx) => {
+          allCands.push({
+            type: 'Mineral Target',
+            color: '#d97706',
+            rank: 'M' + (idx + 1),
+            score: c.potential_score || c.prospectivity_score,
+            lat: c.latitude,
+            lon: c.longitude,
+            dist: c.distance_from_target_km || 0,
+            action: 'Geochemical soil sampling'
+          });
+        });
+      }
+
+      // Render candidates list & map markers
+      allCands.slice(0, 12).forEach(c => {
+        // Marker
+        const marker = L.marker([c.lat, c.lon], {
+          icon: createColorIcon(c.color, c.rank)
+        }).addTo(candidateLayerGroup);
+
+        marker.bindPopup(`
+          <div style="font-size:12px;">
+            <b style="color:${c.color}; font-size:13px;">${c.type} #${c.rank}</b><br>
+            <strong>Score:</strong> ${c.score.toFixed(1)} / 100<br>
+            <strong>Distance:</strong> ${c.dist.toFixed(2)} km from target<br>
+            <strong>GPS:</strong> ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}<br>
+            <p style="margin-top:6px; font-size:11px; color:#555;">${c.action}</p>
+          </div>
+        `);
+
+        // List item
+        const div = document.createElement('div');
+        div.className = 'cand-item';
+        div.innerHTML = `
+          <div class="cand-rank" style="color: ${c.color};">${c.rank}</div>
+          <div class="cand-info">
+            <div style="font-weight:600; font-size:11.5px;">${c.type} (${c.dist.toFixed(2)} km)</div>
+            <div class="cand-coords">${c.lat.toFixed(4)}°, ${c.lon.toFixed(4)}°</div>
+          </div>
+          <div class="cand-score">${c.score.toFixed(0)} pts</div>
+        `;
+        div.onclick = () => {
+          map.flyTo([c.lat, c.lon], 15);
+          marker.openPopup();
+        };
+        container.appendChild(div);
+      });
+
+      if (allCands.length === 0) {
+        container.innerHTML = '<div style="font-size:11.5px; color:#94a3b8; text-align:center; padding:15px;">Survey completed. Check full HTML report for detailed maps.</div>';
+      }
+    }
+
+    // Load initial candidates from server on load
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const resp = await fetch('/api/dossier');
+        if (resp.ok) {
+          const dossier = await resp.json();
+          renderResults(dossier);
+        }
+      } catch (e) {
+        console.warn('Initial dossier preload skipped:', e);
+      }
+    });
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,376 @@
+"""
+SiteSurveyor AI — Groundwater Potential Engine (Category 1: WATER)
+==================================================================
+Multi-criteria decision analysis (AHP) for groundwater potential zoning
+and precision borehole siting around target site (Gweru, Zimbabwe).
+
+Evidence layers:
+  1. Lineament density (SAR L-band HV + DEM hillshade) : 0.26
+  2. Slope (Copernicus DEM 30m)                         : 0.18
+  3. Topographic Wetness Index (TWI via D8 routing)     : 0.18
+  4. Land cover infiltration capacity (ESA WorldCover)  : 0.12
+  5. Drainage density (DEM stream networks)             : 0.10
+  6. Mean annual rainfall (CHIRPS monthly)              : 0.08
+  7. Vegetation vigor / moisture (Sentinel-2 GeoMAD)    : 0.08
+"""
+from __future__ import annotations
+
+import csv
+import json
+import os
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+# Import config FIRST before rasterio/pyproj to ensure PROJ paths are initialized
+import src.config as cfg
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
+import numpy as np
+from rasterio.warp import Resampling
+
+from src.utils.classification import classify_zones, find_candidate_sites, jenks_breaks
+from src.utils.lineaments import detect_lineaments, extract_edges, lineament_density
+from src.utils.raster import pixel_to_lonlat, robust_norm, safe_savefig, warp, write_raster
+from src.utils.spectral import ndvi
+from src.utils.terrain import drainage_density, fill_sinks, slope_degrees, terrain_hillshade, twi
+
+
+def run_water_survey(
+    target_lat: float | None = None,
+    target_lon: float | None = None,
+    half_deg: float = 0.12,
+    client: str | None = None,
+    address: str | None = None,
+) -> dict:
+    """Execute complete Category 1: WATER groundwater potential survey."""
+    if target_lat is not None and target_lon is not None:
+        cfg.set_target_site(target_lat, target_lon, half_deg=half_deg, client=client, address=address)
+
+    # Ensure required raw rasters exist for active AOI
+    if not (cfg.RAW / "dem.tif").exists():
+        from src.fetch_data import fetch_all
+        fetch_all()
+
+    print("=" * 65)
+    print(f"SiteSurveyor AI — Running Category 1: Groundwater Survey [{cfg.AOI_SLUG}]")
+    print(f"Target: ({cfg.TARGET_LAT:.5f}, {cfg.TARGET_LON:.5f}) | Client: {cfg.CLIENT}")
+    print("=" * 65)
+
+    # 1. Load data layers
+    print("[1/6] Loading and reprojecting raw rasters...")
+    dem = warp(cfg.RAW / "dem.tif", 1)
+    lc = warp(cfg.RAW / "landcover.tif", 1, resampling=Resampling.nearest)
+    alos_hv = warp(cfg.RAW / "alos.tif", 2)
+    rain = warp(cfg.RAW / "rain_mean.tif", 1)
+    red = warp(cfg.RAW / "geomad.tif", 3, scale=10000.0)
+    nir = warp(cfg.RAW / "geomad.tif", 7, scale=10000.0)
+
+    # 2. Terrain and hydrological modeling
+    print("[2/6] Modeling terrain derivatives, D8 flow, and TWI...")
+    slope = slope_degrees(dem)
+    hs = terrain_hillshade(dem)
+    filled = fill_sinks(dem)
+    twi_layer = twi(filled, slope)
+
+    # Extract streams from filled flow accumulation for drainage density
+    from src.utils.terrain import d8_flow
+    _, flow_acc = d8_flow(filled)
+    drain_dens = drainage_density(flow_acc, threshold=500, kernel_radius=17)
+
+    # 3. Structural fracture extraction
+    print("[3/6] Detecting structural lineaments (SAR + DEM hillshade)...")
+    edges = extract_edges(alos_hv, hs)
+    segments = detect_lineaments(edges, threshold=25, min_length_px=30, line_gap_px=5, min_length_meters=600.0)
+    lin_dens = lineament_density(segments, kernel_radius_px=17)
+    print(f"      Extracted {len(segments)} valid regional lineament segments (>=600m)")
+
+    # 4. Infiltration, NDVI & rainfall
+    print("[4/6] Processing land cover infiltration, NDVI, and rainfall...")
+    infil_map = {
+        10: 0.8,  # Trees
+        20: 0.7,  # Shrubland
+        30: 0.6,  # Grassland
+        40: 0.5,  # Cropland
+        50: 0.1,  # Built-up
+        60: 0.3,  # Bare
+        80: 0.0,  # Water
+        90: 0.9,  # Wetland
+    }
+    infil = np.zeros_like(lc, dtype="float32")
+    for k, v in infil_map.items():
+        infil[lc == k] = v
+
+    ndvi_layer = ndvi(nir, red)
+
+    # 5. Evidence normalization & weighted overlay
+    print("[5/6] Multi-criteria weighted overlay (AHP)...")
+    norm_lin = robust_norm(lin_dens)
+    norm_slope = 1.0 - robust_norm(slope)  # Flatter slopes favor infiltration
+    norm_twi = robust_norm(twi_layer)
+    norm_infil = robust_norm(infil)
+    norm_drain = robust_norm(drain_dens)
+    norm_rain = robust_norm(rain)
+    norm_ndvi = robust_norm(ndvi_layer)
+
+    w = cfg.WATER_WEIGHTS
+    index_raw = (
+        w["lineament_density"] * norm_lin +
+        w["slope"] * norm_slope +
+        w["twi"] * norm_twi +
+        w["landcover_infiltration"] * norm_infil +
+        w["drainage_density"] * norm_drain +
+        w["rainfall"] * norm_rain +
+        w["ndvi"] * norm_ndvi
+    )
+
+    # Rescale to 0-100 continuous index
+    gwpz_index = robust_norm(index_raw) * 100.0
+
+    # Masks for water and settlements
+    water_mask = (lc == 80)
+    builtup_mask = (lc == 50)
+
+    # Natural breaks classification
+    valid_scores = gwpz_index[np.isfinite(gwpz_index) & ~water_mask & ~builtup_mask]
+    breaks = jenks_breaks(valid_scores, k=5)
+    print(f"      Natural breaks (k=5): {[round(float(b), 1) for b in breaks]}")
+
+    classes = classify_zones(gwpz_index, breaks, water_mask=water_mask, builtup_mask=builtup_mask)
+
+    # Target site assessment
+    tr, tc = cfg.TARGET_ROW, cfg.TARGET_COL
+    t_score = float(gwpz_index[tr, tc])
+    t_class = int(classes[tr, tc])
+    class_names = {0: "Water", 1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high", 6: "Built-up"}
+
+    # Local 5x5 window (150m buffer) around target to avoid single-pixel noise
+    r0, r1 = max(0, tr - 2), min(cfg.HEIGHT, tr + 3)
+    c0, c1 = max(0, tc - 2), min(cfg.WIDTH, tc + 3)
+    local_mean = float(np.nanmean(gwpz_index[r0:r1, c0:c1]))
+    local_class = int(np.digitize(local_mean, breaks) + 1)
+    local_class = min(max(local_class, 1), 5)
+
+    print(f"      Target Coordinate Cell: {t_score:.1f}/100 ({class_names.get(t_class)})")
+    print(f"      Target 150m Parcel Mean: {local_mean:.1f}/100 ({class_names.get(local_class)})")
+
+    # Candidate borehole site picking (with border exclusion and proximity weighting)
+    candidates = find_candidate_sites(
+        gwpz_index, classes, min_class=4, min_distance_m=300.0, top_k=8,
+        target_row=tr, target_col=tc, border_margin_px=25, proximity_weight=0.08
+    )
+    print(f"      Identified {len(candidates)} high-potential borehole candidates (prioritized by proximity)")
+
+    # 6. Export rasters, vectors, maps, and metadata
+    print("[6/6] Exporting GeoTIFFs, vectors, maps, and JSON summary...")
+
+    # A. Write Rasters
+    write_raster(cfg.OUT / "groundwater_potential_zones.tif", classes, dtype="uint8", nodata=255)
+    write_raster(cfg.OUT / "gwpz_index.tif", gwpz_index, dtype="float32", nodata=np.nan)
+
+    # B. Write Candidate CSV
+    csv_path = cfg.OUT / "candidate_borehole_sites.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "rank", "latitude", "longitude", "potential_score", "class_name", "distance_from_target_km"
+        ])
+        writer.writeheader()
+        for cand in candidates:
+            writer.writerow({
+                "rank": cand["rank"],
+                "latitude": cand["latitude"],
+                "longitude": cand["longitude"],
+                "potential_score": cand["potential_score"],
+                "class_name": cand["class_name"],
+                "distance_from_target_km": cand["distance_from_target_km"],
+            })
+
+    # C. Write Candidate GeoJSON
+    geojson_features = []
+    for cand in candidates:
+        geojson_features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [cand["longitude"], cand["latitude"]]},
+            "properties": {
+                "rank": cand["rank"],
+                "score": cand["potential_score"],
+                "class": cand["class_name"],
+                "dist_target_km": cand["distance_from_target_km"],
+            }
+        })
+    geojson_data = {"type": "FeatureCollection", "features": geojson_features}
+    (cfg.OUT / "candidate_borehole_sites.geojson").write_text(json.dumps(geojson_data, indent=2))
+
+    # D. Compute Area Statistics
+    cell_km2 = (cfg.CELL * cfg.CELL) / 1e6
+    area_stats = {}
+    for code, name in class_names.items():
+        count = int(np.sum(classes == code))
+        area_stats[name] = {
+            "area_km2": round(count * cell_km2, 2),
+            "percentage": round(count / (cfg.WIDTH * cfg.HEIGHT) * 100.0, 1),
+        }
+
+    # E. Render Cartographic Maps
+    _render_main_map(gwpz_index, classes, hs, candidates, breaks)
+    _render_evidence_map(dem, slope, twi_layer, lin_dens, ndvi_layer, rain, infil, drain_dens)
+    _render_zoom_map(classes, hs, candidates)
+
+    # F. Save JSON Summary
+    summary = {
+        "project": "SiteSurveyor AI — Groundwater Potential Screening",
+        "client": cfg.CLIENT,
+        "address": cfg.CLIENT_ADDRESS,
+        "analyst": cfg.ANALYST,
+        "target_coordinates": {"latitude": cfg.TARGET_LAT, "longitude": cfg.TARGET_LON},
+        "target_assessment": {
+            "coordinate_cell_score": round(t_score, 1),
+            "coordinate_cell_class": class_names.get(t_class),
+            "parcel_mean_150m": round(local_mean, 1),
+            "parcel_class_150m": class_names.get(local_class),
+            "slope_degrees": round(float(slope[tr, tc]), 2),
+            "twi": round(float(twi_layer[tr, tc]), 2),
+            "lineament_density_pct": round(float(norm_lin[tr, tc]) * 100, 1),
+            "ndvi": round(float(ndvi_layer[tr, tc]), 3),
+        },
+        "model_weights": cfg.WATER_WEIGHTS,
+        "natural_breaks": [round(float(b), 1) for b in breaks],
+        "class_area_distribution": area_stats,
+        "candidate_sites": candidates,
+    }
+    (cfg.OUT / "summary.json").write_text(json.dumps(summary, indent=2))
+
+    # G. Export Mobile KML and KMZ for Smartphone GPS
+    from src.utils.export import export_candidates_kml, export_kmz
+    kml_path = cfg.OUT / "candidate_borehole_sites.kml"
+    kmz_path = cfg.OUT / "candidate_borehole_sites.kmz"
+    export_candidates_kml(candidates, kml_path, survey_name="Groundwater Potential")
+    export_kmz(kml_path, kmz_path)
+
+    print(f"\n[DONE] Survey completed successfully! Outputs available in {cfg.OUT}")
+    return summary
+
+
+def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, candidates: list[dict], breaks: np.ndarray):
+    """Render high-resolution cartographic classified groundwater potential map."""
+    fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+
+    # Palette: Water (Blue), Very Low (Red), Low (Orange), Moderate (Yellow), High (Light Green), Very High (Dark Green), Builtup (Purple/Gray)
+    colors = ["#1f77b4", "#d73027", "#f46d43", "#fdae61", "#a6d96a", "#1a9850", "#7f7f7f"]
+    cmap = ListedColormap(colors)
+
+    # Blend with hillshade
+    base_rgb = cmap(classes / 6.0)[:, :, :3]
+    shaded = np.clip(base_rgb * (0.65 + 0.35 * np.dstack([hs, hs, hs])), 0, 1)
+
+    ax.imshow(shaded, extent=[0, cfg.WIDTH * cfg.CELL / 1000, 0, cfg.HEIGHT * cfg.CELL / 1000])
+
+    # Plot target site
+    tx_km = cfg.TARGET_COL * cfg.CELL / 1000
+    ty_km = (cfg.HEIGHT - cfg.TARGET_ROW) * cfg.CELL / 1000
+    ax.scatter(tx_km, ty_km, marker="*", s=220, color="yellow", edgecolors="black", linewidths=1.5, zorder=10, label="Client Target Site")
+
+    # Plot top candidate borehole sites
+    for cand in candidates:
+        cx_km = cand["col"] * cfg.CELL / 1000
+        cy_km = (cfg.HEIGHT - cand["row"]) * cfg.CELL / 1000
+        ax.scatter(cx_km, cy_km, marker="o", s=110, color="cyan", edgecolors="black", linewidths=1.2, zorder=9)
+        ax.annotate(f"#{cand['rank']}", (cx_km + 0.3, cy_km + 0.3), fontsize=9, fontweight="bold", color="black",
+                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.85), zorder=11)
+
+    ax.set_title(f"Groundwater Potential Zones (GWPZ) — {cfg.CLIENT}\nTarget: {cfg.TARGET_LAT:.4f}°S, {cfg.TARGET_LON:.4f}°E ({cfg.CLIENT_ADDRESS})", fontsize=11, color=cfg.BRAND_COLOR, pad=12)
+    ax.set_xlabel("Easting (km)", fontsize=10)
+    ax.set_ylabel("Northing (km)", fontsize=10)
+
+    # Custom legend
+    legend_elements = [
+        Patch(facecolor="#1a9850", edgecolor="k", label="Very High Potential"),
+        Patch(facecolor="#a6d96a", edgecolor="k", label="High Potential"),
+        Patch(facecolor="#fdae61", edgecolor="k", label="Moderate Potential"),
+        Patch(facecolor="#f46d43", edgecolor="k", label="Low Potential"),
+        Patch(facecolor="#d73027", edgecolor="k", label="Very Low Potential"),
+        Patch(facecolor="#7f7f7f", edgecolor="k", label="Built-up (Excluded)"),
+        Patch(facecolor="#1f77b4", edgecolor="k", label="Water Body"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
+
+    plt.tight_layout()
+    safe_savefig(plt, cfg.OUT / "groundwater_potential_map.png", dpi=200)
+    plt.close()
+
+
+def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain):
+    """Render 8-panel diagnostic plot of all evidence layers."""
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=180)
+    panels = [
+        ("DEM Elevation (m)", dem, "terrain"),
+        ("Slope (degrees)", slope, "magma"),
+        ("Topographic Wetness (TWI)", twi_arr, "YlGnBu"),
+        ("Lineament Density (km/km²)", lin, "plasma"),
+        ("NDVI (Sentinel-2)", ndvi_arr, "YlGn"),
+        ("Rainfall (CHIRPS mm/mo)", rain, "Blues"),
+        ("Infiltration Capacity", infil, "YlOrRd"),
+        ("Drainage Density (km/km²)", drain, "Blues"),
+    ]
+
+    for ax, (title, arr, cm) in zip(axes.flat, panels):
+        im = ax.imshow(arr, cmap=cm)
+        ax.set_title(title, fontsize=10, fontweight="bold")
+        ax.axis("off")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.suptitle(f"SiteSurveyor AI — Groundwater Evidence Layers [{cfg.CLIENT}]", fontsize=13, color=cfg.BRAND_COLOR, y=0.98)
+    plt.tight_layout()
+    safe_savefig(plt, cfg.OUT / "evidence_layers.png", dpi=180)
+    plt.close()
+
+
+def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]):
+    """Render 5x5 km local zoom centered on target site."""
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=200)
+
+    # 5x5 km window around target (approx 167x167 pixels)
+    half_px = int(2500 / cfg.CELL)
+    r0, r1 = max(0, cfg.TARGET_ROW - half_px), min(cfg.HEIGHT, cfg.TARGET_ROW + half_px)
+    c0, c1 = max(0, cfg.TARGET_COL - half_px), min(cfg.WIDTH, cfg.TARGET_COL + half_px)
+
+    sub_cls = classes[r0:r1, c0:c1]
+    sub_hs = hs[r0:r1, c0:c1]
+
+    colors = ["#1f77b4", "#d73027", "#f46d43", "#fdae61", "#a6d96a", "#1a9850", "#7f7f7f"]
+    cmap = ListedColormap(colors)
+    shaded = np.clip(cmap(sub_cls / 6.0)[:, :, :3] * (0.65 + 0.35 * np.dstack([sub_hs, sub_hs, sub_hs])), 0, 1)
+
+    extent = [(c0 - cfg.TARGET_COL) * cfg.CELL / 1000, (c1 - cfg.TARGET_COL) * cfg.CELL / 1000,
+              (cfg.TARGET_ROW - r1) * cfg.CELL / 1000, (cfg.TARGET_ROW - r0) * cfg.CELL / 1000]
+
+    ax.imshow(shaded, extent=extent)
+    ax.scatter(0, 0, marker="*", s=260, color="yellow", edgecolors="black", linewidths=1.5, zorder=10, label="Client Site")
+
+    for cand in candidates:
+        dx = (cand["col"] - cfg.TARGET_COL) * cfg.CELL / 1000
+        dy = (cfg.TARGET_ROW - cand["row"]) * cfg.CELL / 1000
+        if extent[0] <= dx <= extent[1] and extent[2] <= dy <= extent[3]:
+            ax.scatter(dx, dy, marker="o", s=130, color="cyan", edgecolors="black", linewidths=1.2, zorder=9)
+            ax.annotate(f"#{cand['rank']}", (dx + 0.1, dy + 0.1), fontsize=9, fontweight="bold",
+                        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.85), zorder=11)
+
+    ax.set_title(f"5×5 km Local Site Siting Map — {cfg.CLIENT}\nRelative offset from Client Property (km)", fontsize=10, color=cfg.BRAND_COLOR)
+    ax.set_xlabel("Offset East (km)")
+    ax.set_ylabel("Offset North (km)")
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.legend(loc="lower right", fontsize=8)
+
+    plt.tight_layout()
+    safe_savefig(plt, cfg.OUT / "site_zoom_map.png", dpi=200)
+    plt.close()
+
+
+if __name__ == "__main__":
+    run_water_survey()

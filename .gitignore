@@ -1,0 +1,52 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+
+# ---- Virtual environments ----
+.venv/
+venv/
+ENV/
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS ----
+Thumbs.db
+.DS_Store
+
+# ---- Environment & secrets ----
+.env
+
+# ---- Project data directories ----
+data/raw/
+data/external/
+outputs/
+
+# ---- Rasters in data dirs ----
+data/**/*.tif
+
+# ---- Scratch files ----
+scratch_*
+
+# ---- Byte-compiled ----
+*.pyc
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- Coverage / testing ----
+.coverage
+htmlcov/
+.pytest_cache/
