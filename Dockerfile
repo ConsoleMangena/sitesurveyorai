@@ -1,7 +1,12 @@
 # ==============================================================================
 # SiteSurveyor AI — Production Dockerfile for Render / Cloud Deployment
 # ==============================================================================
-FROM python:3.11-slim
+# 3.14, not 3.11: pyproj and rasterio both require Python >=3.12 since the releases whose
+# bundled PROJ data agree with each other. On 3.11 pip silently resolves the older pair,
+# where rasterio's vendored libproj rejects pyproj's proj.db
+# ("DATABASE.LAYOUT.VERSION.MINOR = 4 whereas a number >= 6 is expected") and every CRS
+# lookup fails at import. The image now takes the same wheels the test suite runs against.
+FROM python:3.14-slim
 
 # Avoid prompts from debian frontends
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,20 +22,15 @@ ENV GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
 # SQLite-backed coordinate-database load links against libexpat.so.1. python:*-slim
 # does not ship it, so "import rasterio" raises ImportError in the container and the
 # instance restarts in a loop before /health is ever reachable.
-# proj-data settles a second clash: pyproj points PROJ_DATA at its own bundled proj.db,
-# rasterio's newer vendored libproj rejects it ("DATABASE.LAYOUT.VERSION.MINOR = 4
-# whereas a number >= 6 is expected. It comes from another PROJ installation") and every
-# CRS lookup dies. One system dataset is the only version both wheels can read.
+# No proj-data package: both wheels ship their own PROJ database, and src/config.py
+# points PROJ_DATA at pyproj's copy, so a system dataset (Debian trixie's is layout 5)
+# would only add a third version for the two libraries to disagree about.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     libgomp1 \
     libexpat1 \
-    proj-data \
     && rm -rf /var/lib/apt/lists/*
-
-ENV PROJ_DATA=/usr/share/proj \
-    PROJ_LIB=/usr/share/proj
 
 WORKDIR /app
 
@@ -49,8 +49,6 @@ RUN mkdir -p /app/data/raw /app/outputs
 # Import the app once during the build. A missing shared library or module otherwise
 # surfaces only as a restarting instance and a 502, with the traceback buried in runtime
 # logs; this turns it into a build failure that names the missing piece.
-COPY tools/ ./tools/
-RUN python tools/proj_doctor.py || true
 RUN python -c "import src.api; print('app imports clean')"
 
 EXPOSE 8000
