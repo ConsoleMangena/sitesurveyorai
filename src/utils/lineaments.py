@@ -8,7 +8,7 @@ lineament intersections (>20° disparity), and strike azimuth analysis.
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import binary_dilation, uniform_filter
 from skimage.draw import line as draw_line
 from skimage.feature import canny
 from skimage.transform import probabilistic_hough_line
@@ -17,19 +17,38 @@ import src.config as cfg
 from src.utils.raster import robust_norm
 
 
-def extract_edges(sar_hv: np.ndarray, hillshade: np.ndarray) -> np.ndarray:
+def extract_edges(sar_hv: np.ndarray, hillshade: np.ndarray, void_margin_px: int = 4) -> np.ndarray:
     """
     Extract multi-source structural edges by fusing SAR backscatter and DEM hillshade.
+
+    Edges are dropped around data voids: the step from a filled zero to real
+    backscatter is a sharp linear gradient, so an unmasked void boundary is
+    detected as a regional lineament.
     """
-    # Normalize SAR HV backscatter
-    sar_clean = np.nan_to_num(robust_norm(sar_hv, 2, 98), nan=0.0)
-    hs_clean = np.nan_to_num(hillshade, nan=0.0)
+    sar_norm = robust_norm(sar_hv, 2, 98)
+    void = ~np.isfinite(sar_norm) | ~np.isfinite(hillshade)
+
+    sar_clean = np.where(np.isfinite(sar_norm), sar_norm, 0.0)
+    hs_clean = np.where(np.isfinite(hillshade), hillshade, 0.0)
 
     # Canny on both layers
     e_sar = canny(sar_clean, sigma=1.5, low_threshold=0.10, high_threshold=0.25)
     e_dem = canny(hs_clean, sigma=1.5, low_threshold=0.12, high_threshold=0.29)
 
-    return e_sar | e_dem
+    edges = e_sar | e_dem
+    if void.any():
+        margin = np.ones((3, 3), dtype=bool)
+        excluded = binary_dilation(void, structure=margin, iterations=void_margin_px)
+        edges &= ~excluded
+
+    return edges
+
+
+def effective_min_length_m(min_length_px: int = 30, min_length_meters: float = 600.0) -> float:
+    """The binding length floor is whichever of the two filters is stricter.
+    At a 30 m cell, min_length_px=30 already demands ~900 m, so reporting only
+    the nominal 600 m would understate what was actually kept."""
+    return max(float(min_length_px) * cfg.CELL, float(min_length_meters))
 
 
 def detect_lineaments(
@@ -81,9 +100,15 @@ def segment_azimuths(segments: list[tuple[tuple[int, int], tuple[int, int]]]) ->
 def lineament_density(
     segments: list[tuple[tuple[int, int], tuple[int, int]]],
     kernel_radius_px: int = 17,
+    valid_mask: np.ndarray | None = None,
+    min_observed_fraction: float = 0.34,
 ) -> np.ndarray:
     """
     Rasterize lineaments and calculate lineament density in km/km².
+
+    Density is per km² of *observed* surface. Dividing by a window that also
+    contains data voids depresses density beside void edges, so windows below
+    `min_observed_fraction` coverage return NaN instead of a fabricated value.
     """
     line_grid = np.zeros((cfg.HEIGHT, cfg.WIDTH), dtype="float32")
 
@@ -96,9 +121,20 @@ def lineament_density(
     size = kernel_radius_px * 2 + 1
     fraction = uniform_filter(line_grid, size=size, mode="reflect")
 
-    # Convert cell count fraction to km of line per km² of area
-    # Each cell represents ~30m length in 900m2 area -> factor = 33.33 km/km2
-    density = fraction * (cfg.CELL / 1000.0) / ((cfg.CELL * cfg.CELL) / 1e6)
+    observed = (
+        np.ones((cfg.HEIGHT, cfg.WIDTH), dtype="float32")
+        if valid_mask is None
+        else np.asarray(valid_mask, dtype="float32")
+    )
+    obs_fraction = uniform_filter(observed, size=size, mode="reflect")
+
+    # Each occupied cell represents ~CELL m of line inside CELL² m² of ground.
+    km_per_km2 = (cfg.CELL / 1000.0) / ((cfg.CELL * cfg.CELL) / 1e6)
+    density = np.where(
+        obs_fraction >= min_observed_fraction,
+        fraction / np.maximum(obs_fraction, 1e-6) * km_per_km2,
+        np.nan,
+    )
     return density.astype("float32")
 
 
@@ -106,15 +142,24 @@ def lineament_intersections(
     segments: list[tuple[tuple[int, int], tuple[int, int]]],
     min_angle_diff: float = 20.0,
     kernel_radius_px: int = 17,
+    valid_mask: np.ndarray | None = None,
+    min_observed_fraction: float = 0.34,
 ) -> tuple[np.ndarray, list[tuple[float, float]]]:
     """
     Find intersection points between lineaments with angular disparity > min_angle_diff.
     Returns:
-        intersection_density: (H, W) raster of intersection density
+        intersection_density: (H, W) raster of intersections per km² of observed
+            surface, NaN where the neighbourhood has too little coverage
         pts: List of (col, row) coordinates of intersection nodes
     """
     inter_grid = np.zeros((cfg.HEIGHT, cfg.WIDTH), dtype="float32")
     pts: list[tuple[float, float]] = []
+
+    observed = (
+        None
+        if valid_mask is None
+        else np.asarray(valid_mask, dtype="float32")
+    )
 
     def line_intersection(p1, p2, p3, p4):
         x1, y1 = p1
@@ -158,13 +203,23 @@ def lineament_intersections(
                 c, r = pt
                 ri, ci = int(round(r)), int(round(c))
                 if 0 <= ri < cfg.HEIGHT and 0 <= ci < cfg.WIDTH:
+                    if observed is not None and observed[ri, ci] < 0.5:
+                        continue
                     inter_grid[ri, ci] += 1.0
                     pts.append((c, r))
 
     size = kernel_radius_px * 2 + 1
-    density = uniform_filter(inter_grid, size=size, mode="reflect")
-    # Intersections per km²
-    area_km2 = (size * cfg.CELL / 1000.0) ** 2
-    density_km2 = (density * (size * size)) / area_km2
+    window_cells = float(size * size)
+    counts = uniform_filter(inter_grid, size=size, mode="reflect") * window_cells
+    obs_grid = np.ones((cfg.HEIGHT, cfg.WIDTH), dtype="float32") if observed is None else observed
+    obs_cells = uniform_filter(obs_grid, size=size, mode="reflect") * window_cells
+
+    # Per km² of observed ground, so partial coverage is not read as sparse structure
+    cell_area_km2 = (cfg.CELL / 1000.0) ** 2
+    density_km2 = np.where(
+        obs_cells >= min_observed_fraction * window_cells,
+        counts / np.maximum(obs_cells, 1.0) / cell_area_km2,
+        np.nan,
+    )
     return density_km2.astype("float32"), pts
 

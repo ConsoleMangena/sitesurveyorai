@@ -12,6 +12,12 @@ from scipy.ndimage import maximum_filter
 import src.config as cfg
 from src.utils.raster import pixel_to_lonlat
 
+# Zone raster class domain. 255 is reserved for pixels with no usable satellite
+# coverage: an unobserved pixel must never be reported as a scored class.
+NODATA_CLASS = 255
+MIN_SCORED_CLASS = 1
+MAX_SCORED_CLASS = 5
+
 
 def jenks_breaks(values: np.ndarray, k: int = 5, max_iter: int = 25) -> np.ndarray:
     """
@@ -20,13 +26,15 @@ def jenks_breaks(values: np.ndarray, k: int = 5, max_iter: int = 25) -> np.ndarr
         Sorted array of k - 1 interior break thresholds.
     """
     v = values[np.isfinite(values)].astype("float64")
+    if v.size == 0:
+        return np.linspace(0.0, 1.0, k + 1)[1:-1].astype("float32")
     if len(v) < k * 5:
-        return np.linspace(np.nanmin(v), np.nanmax(v), k + 1)[1:-1].astype("float32")
+        return np.linspace(v.min(), v.max(), k + 1)[1:-1].astype("float32")
 
-    # Sample for performance if large
+    # Sample for performance if large. A local generator keeps this function
+    # reproducible without reseeding the caller's global RNG stream.
     if len(v) > 25000:
-        np.random.seed(42)
-        v_sub = np.random.choice(v, 25000, replace=False)
+        v_sub = np.random.default_rng(42).choice(v, 25000, replace=False)
     else:
         v_sub = v
 
@@ -66,17 +74,97 @@ def classify_zones(
         4: High
         5: Very High
         6: Built-up / Settlement (excluded)
+        255: No data — the index is not finite at this pixel
+
+    np.digitize places NaN in the highest bin, so non-finite pixels are
+    classified here explicitly instead of silently becoming "Very High".
     """
-    zones = np.digitize(index_0_100, breaks) + 1  # 1 to 5
-    zones = np.clip(zones, 1, len(breaks) + 1).astype("uint8")
+    zones = np.full(index_0_100.shape, NODATA_CLASS, dtype="uint8")
+
+    finite = np.isfinite(index_0_100)
+    if np.any(finite):
+        scored = np.clip(
+            np.digitize(index_0_100[finite], breaks) + 1,
+            MIN_SCORED_CLASS,
+            MAX_SCORED_CLASS,
+        )
+        zones[finite] = scored
 
     if water_mask is not None:
-        zones[water_mask] = 0
+        zones[np.asarray(water_mask, dtype=bool)] = 0
 
     if builtup_mask is not None:
-        zones[builtup_mask] = 6
+        zones[np.asarray(builtup_mask, dtype=bool)] = 6
 
     return zones
+
+
+CLASS_NAMES = {
+    NODATA_CLASS: "No data",
+    0: "Water",
+    1: "Very low",
+    2: "Low",
+    3: "Moderate",
+    4: "High",
+    5: "Very high",
+    6: "Built-up",
+}
+
+# Map colours for unobserved ground, kept out of every ranked palette so a void
+# cannot read as either the best or the worst class.
+NODATA_HEX = "#b8b8b8"
+NODATA_RGB = tuple(184 / 255 for _ in range(3))
+
+
+def zone_class(score: float, breaks: np.ndarray) -> int:
+    """
+    Class a single score into the zone domain.
+
+    A non-finite score is unobserved, not extreme, so it maps to NODATA_CLASS
+    rather than the top bin that np.digitize would assign.
+    """
+    if not np.isfinite(score):
+        return NODATA_CLASS
+    return int(min(max(np.digitize(score, breaks) + 1, MIN_SCORED_CLASS), MAX_SCORED_CLASS))
+
+
+def safe_round(value: float, ndigits: int = 1) -> float | None:
+    """
+    Round for JSON output.
+
+    Unobserved values serialize as null; json.dumps would otherwise emit a bare
+    NaN, which strict parsers (including JavaScript JSON.parse) reject.
+    """
+    v = float(value)
+    return round(v, ndigits) if np.isfinite(v) else None
+
+
+def finite_mean(values: np.ndarray) -> float:
+    """Mean over observed cells only; NaN when the window holds no coverage."""
+    v = np.asarray(values)[np.isfinite(values)]
+    return float(v.mean()) if v.size else float("nan")
+
+
+def paint_zones(
+    classes: np.ndarray,
+    cmap,
+    hillshade: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Paint a classified zone raster as (H, W, 3) float RGB.
+
+    Ranked palettes clamp out-of-range values to their extreme colour, so a 255
+    no-data cell would otherwise print as the top class. Voids are painted flat
+    gray and unobserved terrain is shaded neutrally.
+    """
+    rgb = np.asarray(cmap(np.clip(classes / 6.0, 0.0, 1.0))[..., :3], dtype="float64")
+    rgb[classes == NODATA_CLASS] = NODATA_RGB
+
+    if hillshade is not None:
+        hs = np.where(np.isfinite(hillshade), hillshade, 0.5)
+        rgb = np.clip(rgb * (0.65 + 0.35 * hs[..., None]), 0.0, 1.0)
+
+    return rgb
 
 
 def find_candidate_sites(
@@ -97,7 +185,7 @@ def find_candidate_sites(
 
     Args:
         index_0_100: Continuous potential index (0-100)
-        classes: Discrete zone class raster (0-6)
+        classes: Discrete zone class raster (0-6, or 255 for no coverage)
         min_class: Minimum class required for candidates (default 4 = High)
         min_distance_m: Minimum spatial spacing between candidate sites
         top_k: Maximum number of ranked candidates to return
@@ -149,7 +237,7 @@ def find_candidate_sites(
     rank_metrics = scores / (1.0 + proximity_weight * dists_km)
     sort_order = np.argsort(-rank_metrics)
 
-    class_names = {1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high"}
+    class_names = CLASS_NAMES
 
     candidates: list[dict] = []
     selected_coords: list[tuple[int, int]] = []

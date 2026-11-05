@@ -35,7 +35,18 @@ from matplotlib.patches import Patch
 import numpy as np
 from rasterio.warp import Resampling
 
-from src.utils.classification import classify_zones, find_candidate_sites, jenks_breaks
+from src.utils.classification import (
+    CLASS_NAMES,
+    NODATA_CLASS,
+    NODATA_RGB,
+    classify_zones,
+    finite_mean,
+    find_candidate_sites,
+    jenks_breaks,
+    paint_zones,
+    safe_round,
+    zone_class,
+)
 from src.utils.lineaments import detect_lineaments, extract_edges, lineament_density, lineament_intersections
 from src.utils.raster import robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import ferrous_index, hydroxyl_index, iron_oxide_index, ndvi, residual_index
@@ -81,8 +92,10 @@ def run_minerals_survey(
     hs = terrain_hillshade(dem)
     edges = extract_edges(alos_hv, hs)
     segments = detect_lineaments(edges, threshold=25, min_length_px=30, line_gap_px=5, min_length_meters=600.0)
-    lin_dens = lineament_density(segments, kernel_radius_px=17)
-    inter_dens, inter_pts = lineament_intersections(segments, min_angle_diff=20.0, kernel_radius_px=17)
+    structural_valid = np.isfinite(alos_hv) & np.isfinite(hs)
+    lin_dens = lineament_density(segments, kernel_radius_px=17, valid_mask=structural_valid)
+    inter_dens, inter_pts = lineament_intersections(segments, min_angle_diff=20.0, kernel_radius_px=17,
+                                                    valid_mask=structural_valid)
     print(f"      Detected {len(segments)} regional segments and {len(inter_pts)} structural intersection nodes")
 
     # 3. Spectral Alteration Indices with Vegetation Residual Correction
@@ -146,13 +159,12 @@ def run_minerals_survey(
     tr, tc = cfg.TARGET_ROW, cfg.TARGET_COL
     t_score = float(gold_index[tr, tc])
     t_class = int(classes[tr, tc])
-    class_names = {0: "Water", 1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high", 6: "Built-up"}
+    class_names = CLASS_NAMES
 
     r0, r1 = max(0, tr - 2), min(cfg.HEIGHT, tr + 3)
     c0, c1 = max(0, tc - 2), min(cfg.WIDTH, tc + 3)
-    local_mean = float(np.nanmean(gold_index[r0:r1, c0:c1]))
-    local_class = int(np.digitize(local_mean, breaks) + 1)
-    local_class = min(max(local_class, 1), 5)
+    local_mean = finite_mean(gold_index[r0:r1, c0:c1])
+    local_class = zone_class(local_mean, breaks)
 
     print(f"      Target Coordinate Cell: {t_score:.1f}/100 ({class_names.get(t_class)})")
     print(f"      Target 150m Parcel Mean: {local_mean:.1f}/100 ({class_names.get(local_class)})")
@@ -222,9 +234,9 @@ def run_minerals_survey(
         "analyst": cfg.ANALYST,
         "target_coordinates": {"latitude": cfg.TARGET_LAT, "longitude": cfg.TARGET_LON},
         "target_assessment": {
-            "coordinate_cell_score": round(t_score, 1),
+            "coordinate_cell_score": safe_round(t_score, 1),
             "coordinate_cell_class": class_names.get(t_class),
-            "parcel_mean_150m": round(local_mean, 1),
+            "parcel_mean_150m": safe_round(local_mean, 1),
             "parcel_class_150m": class_names.get(local_class),
         },
         "model_weights": cfg.MINERAL_WEIGHTS,
@@ -252,8 +264,8 @@ def _render_minerals_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray,
     colors = ["#1f77b4", "#4575b4", "#74add1", "#fee090", "#f46d43", "#d73027", "#7f7f7f"]
     cmap = ListedColormap(colors)
 
-    base_rgb = cmap(classes / 6.0)[:, :, :3]
-    shaded = np.clip(base_rgb * (0.65 + 0.35 * np.dstack([hs, hs, hs])), 0, 1)
+    void = classes == NODATA_CLASS
+    shaded = paint_zones(classes, cmap, hs)
 
     ax.imshow(shaded, extent=[0, cfg.WIDTH * cfg.CELL / 1000, 0, cfg.HEIGHT * cfg.CELL / 1000])
 
@@ -281,6 +293,8 @@ def _render_minerals_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray,
         Patch(facecolor="#7f7f7f", edgecolor="k", label="Built-up (Excluded)"),
         Patch(facecolor="#1f77b4", edgecolor="k", label="Water Body"),
     ]
+    if void.any():
+        legend_elements.append(Patch(facecolor=NODATA_RGB, edgecolor="k", label="No satellite coverage"))
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
     plt.tight_layout()

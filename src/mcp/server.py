@@ -16,9 +16,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -53,11 +55,64 @@ def _ensure_data_present():
         fetch_all()
 
 
+def _cached_summary(path: Path, latitude: float, longitude: float) -> dict | None:
+    """Return a stored survey only when it covers this point, saying why it was skipped.
+
+    Silently swallowing a corrupt summary made the agent pay for a full re-survey with no
+    clue that one was available, and treated "unreadable" exactly like "never run".
+    """
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+    except Exception as e:
+        print(f"[cache] {path.name} unreadable -- re-running survey: {type(e).__name__}: {e}")
+        return None
+    if not isinstance(cached, dict):
+        print(f"[cache] {path.name} is a {type(cached).__name__}, not an object -- re-running survey")
+        return None
+
+    # soil_summary.json uses flat target_lat/target_lon; the others nest coordinates.
+    tc = cached.get("target_coordinates") or {
+        "latitude": cached.get("target_lat"),
+        "longitude": cached.get("target_lon"),
+    }
+    lat, lon = tc.get("latitude"), tc.get("longitude")
+    if lat is None or lon is None:
+        print(f"[cache] {path.name} records no target coordinates -- re-running survey")
+        return None
+    if abs(float(lat) - latitude) > 0.001 or abs(float(lon) - longitude) > 0.001:
+        print(f"[cache] {path.name} is for ({lat:.5f}, {lon:.5f}), not ({latitude:.5f}, {longitude:.5f})")
+        return None
+    return cached
+
+
 # ============================================================================
 # MCP Tools
 # ============================================================================
 
+_SITE_LOCK = threading.Lock()
+
+
+def _single_site(fn):
+    """Let one site be under analysis per process.
+
+    The engines read bbox, grid size, cell pitch and target pixel from module-global
+    src.config, which every tool mutates via set_target_site. REST handlers now run in a
+    threadpool so /health keeps answering, which means two surveys genuinely overlap
+    unless something serializes them -- each would analyze the other's AOI and publish
+    plausible numbers for the wrong place. Drop this when an immutable per-job
+    SiteContext replaces those globals.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _SITE_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
 @mcp.tool()
+@_single_site
 def survey_site(
     latitude: float,
     longitude: float,
@@ -165,6 +220,7 @@ def survey_site(
 
 
 @mcp.tool()
+@_single_site
 def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
     """
     Retrieve ranked precision borehole drilling coordinates for a given location.
@@ -179,20 +235,8 @@ def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
         proximity distance, score, and recommended geophysical verification steps (VES/ERT).
     """
     cfg.set_target_site(latitude, longitude)
-    summary_path = cfg.OUT / "summary.json"
-    needs_run = True
-    if summary_path.exists():
-        try:
-            with open(summary_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            tc = cached.get("target_coordinates", {})
-            if abs(tc.get("latitude", 0) - latitude) < 0.001 and abs(tc.get("longitude", 0) - longitude) < 0.001:
-                data = cached
-                needs_run = False
-        except Exception:
-            needs_run = True
-
-    if needs_run:
+    data = _cached_summary(cfg.OUT / "summary.json", latitude, longitude)
+    if data is None:
         _ensure_data_present()
         from src.engines.water import run_water_survey
         data = run_water_survey(latitude, longitude)
@@ -219,6 +263,7 @@ def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
 
 
 @mcp.tool()
+@_single_site
 def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
     """
     Screen shear-zone gold prospectivity and hydrothermal alteration around a site.
@@ -233,20 +278,8 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
         alteration indicators (iron oxide, gossan, hydroxyl clay), and ranked targets.
     """
     cfg.set_target_site(latitude, longitude)
-    summary_path = cfg.OUT / "mineral_summary.json"
-    needs_run = True
-    if summary_path.exists():
-        try:
-            with open(summary_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            tc = cached.get("target_coordinates") or cached.get("target_assessment", {}).get("target_coordinates", {})
-            if abs(tc.get("latitude", 0) - latitude) < 0.001 and abs(tc.get("longitude", 0) - longitude) < 0.001:
-                data = cached
-                needs_run = False
-        except Exception:
-            needs_run = True
-
-    if needs_run:
+    data = _cached_summary(cfg.OUT / "mineral_summary.json", latitude, longitude)
+    if data is None:
         _ensure_data_present()
         from src.engines.minerals import run_minerals_survey
         data = run_minerals_survey(latitude, longitude)
@@ -267,6 +300,7 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
 
 
 @mcp.tool()
+@_single_site
 def get_soil_capability(latitude: float, longitude: float, top_k: int = 5) -> dict:
     """
     Assess agricultural land capability, soil moisture, and erosion risk.
@@ -280,19 +314,8 @@ def get_soil_capability(latitude: float, longitude: float, top_k: int = 5) -> di
         Dictionary with Soil Capability Index (SCI), erosion risk, and prime arable land zones.
     """
     cfg.set_target_site(latitude, longitude)
-    summary_path = cfg.OUT / "soil_summary.json"
-    needs_run = True
-    if summary_path.exists():
-        try:
-            with open(summary_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if abs(cached.get("target_lat", 0) - latitude) < 0.001 and abs(cached.get("target_lon", 0) - longitude) < 0.001:
-                data = cached
-                needs_run = False
-        except Exception:
-            needs_run = True
-
-    if needs_run:
+    data = _cached_summary(cfg.OUT / "soil_summary.json", latitude, longitude)
+    if data is None:
         _ensure_data_present()
         from src.engines.soil import run_soil_survey
         data = run_soil_survey(latitude, longitude)
@@ -313,6 +336,7 @@ def get_soil_capability(latitude: float, longitude: float, top_k: int = 5) -> di
 
 
 @mcp.tool()
+@_single_site
 def get_hazard_safety(latitude: float, longitude: float, top_k: int = 5) -> dict:
     """
     Assess multi-hazard exposure (flood, slope failure, erosion, wildfire, drought) and safest buildable sites.
@@ -327,20 +351,8 @@ def get_hazard_safety(latitude: float, longitude: float, top_k: int = 5) -> dict
         and ranked low-risk buildable locations.
     """
     cfg.set_target_site(latitude, longitude)
-    summary_path = cfg.OUT / "hazard_summary.json"
-    needs_run = True
-    if summary_path.exists():
-        try:
-            with open(summary_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            tc = cached.get("target_coordinates", {})
-            if abs(tc.get("latitude", 0) - latitude) < 0.001 and abs(tc.get("longitude", 0) - longitude) < 0.001:
-                data = cached
-                needs_run = False
-        except Exception:
-            needs_run = True
-
-    if needs_run:
+    data = _cached_summary(cfg.OUT / "hazard_summary.json", latitude, longitude)
+    if data is None:
         _ensure_data_present()
         from src.engines.hazard import run_hazard_survey
         data = run_hazard_survey(latitude, longitude)
@@ -363,6 +375,7 @@ def get_hazard_safety(latitude: float, longitude: float, top_k: int = 5) -> dict
 
 
 @mcp.tool()
+@_single_site
 def get_executive_dossier() -> dict:
     """
     Retrieve the master cross-category site intelligence dossier.

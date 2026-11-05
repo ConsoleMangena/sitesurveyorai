@@ -63,7 +63,8 @@ def robust_norm(a: np.ndarray, lo: float = 2, hi: float = 98) -> np.ndarray:
     """
     valid = a[np.isfinite(a)]
     if len(valid) == 0:
-        return np.zeros_like(a)
+        # Zero would read as "confidently lowest"; an unobserved layer has no value.
+        return np.full(a.shape, np.nan, dtype="float32")
     p_lo, p_hi = np.percentile(valid, [lo, hi])
     return np.clip((a - p_lo) / (p_hi - p_lo + 1e-9), 0, 1)
 
@@ -113,20 +114,27 @@ def lonlat_to_pixel(lon: float, lat: float) -> tuple[int, int]:
 
 
 def safe_savefig(fig, path: Path, dpi: int = 200, retries: int = 4) -> None:
-    """Save matplotlib figure with retry logic to bypass transient Windows file locks."""
+    """
+    Save a matplotlib figure, retrying transient Windows file locks.
+
+    A map that never reaches disk must fail loudly: silently dropping a
+    deliverable leaves the report pointing at a file that does not exist.
+    """
+    import os
     import time
+
+    last_err: OSError | None = None
     for attempt in range(retries):
         try:
             fig.savefig(path, dpi=dpi)
             return
-        except OSError:
+        except OSError as e:
+            last_err = e
             time.sleep(0.4 * (attempt + 1))
 
-    # Fallback: save to temp and replace
     tmp_path = path.with_name(f"{path.stem}_{int(time.time())}{path.suffix}")
-    fig.savefig(tmp_path, dpi=dpi)
     try:
-        import os
+        fig.savefig(tmp_path, dpi=dpi)
         os.replace(tmp_path, path)
-    except Exception:
-        pass
+    except (OSError, RuntimeError) as e:
+        raise RuntimeError(f"Failed to write map figure to {path}: {e}") from e

@@ -13,10 +13,12 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 # Ensure project root is in sys.path
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -26,6 +28,7 @@ if str(ROOT_DIR) not in sys.path:
 # Always import config first to configure PROJ paths before rasterio loads
 import src.config as cfg
 from src.mcp.server import (
+    _SITE_LOCK,
     get_boreholes as _mcp_get_boreholes,
     get_executive_dossier as _mcp_get_executive_dossier,
     get_hazard_safety as _mcp_get_hazard_safety,
@@ -39,6 +42,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.responses import Response
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
@@ -46,19 +51,19 @@ from pydantic import BaseModel, Field
 # Request Models
 # ---------------------------------------------------------------------------
 class SurveyRequest(BaseModel):
-    latitude: float = Field(..., description="Target latitude in decimal degrees")
-    longitude: float = Field(..., description="Target longitude in decimal degrees")
+    latitude: float = Field(..., ge=-90, le=90, description="Target latitude in decimal degrees")
+    longitude: float = Field(..., ge=-180, le=180, description="Target longitude in decimal degrees")
     categories: list[str] = Field(default=["all"], description="Categories: 'water', 'minerals', 'soil', 'hazard', or 'all'")
     client_name: str = Field(default="Client", description="Client or project name")
     address: str = Field(default="", description="Location or property address description")
-    half_deg: float = Field(default=0.12, description="AOI radius buffer in degrees (~13.3 km)")
+    half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
 
 
 class TargetRequest(BaseModel):
-    latitude: float = Field(..., description="Target latitude in decimal degrees")
-    longitude: float = Field(..., description="Target longitude in decimal degrees")
+    latitude: float = Field(..., ge=-90, le=90, description="Target latitude in decimal degrees")
+    longitude: float = Field(..., ge=-180, le=180, description="Target longitude in decimal degrees")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of ranked candidates to return")
-    half_deg: float = Field(default=0.12, description="AOI radius buffer in degrees (~13.3 km)")
+    half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
 
 
 # ---------------------------------------------------------------------------
@@ -72,20 +77,71 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS: Allow cross-origin requests from web dashboards and frontend apps
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+logger = logging.getLogger("sitesurveyor.api")
+
+
+def _allowed_origins() -> list[str]:
+    """Cross-origin callers, opt-in.
+
+    The bundled sandbox fetches /api/* with relative URLs, so it is same-origin and needs
+    no entry. A wildcard combined with allow_credentials=True makes Starlette reflect
+    whatever Origin header arrives, which lets any website make credentialed calls here
+    and read the responses -- so there is no wildcard mode, only a list.
+    """
+    raw = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        logger.warning("ALLOWED_ORIGINS contains '*' but credentialed CORS cannot be "
+                       "wildcarded; ignoring the wildcard. List explicit origins instead.")
+        origins = [o for o in origins if o != "*"]
+    for origin in origins:
+        if not origin.startswith(("https://", "http://localhost", "http://127.0.0.1")):
+            logger.warning("ALLOWED_ORIGINS entry %r is not https and not localhost -- "
+                           "a plain-HTTP origin lets a network observer read API responses.", origin)
+    return origins
+
+
+def _is_same_origin(origin: str, host: str | None) -> bool:
+    """True when a page is calling the very host it was served from.
+
+    Compared against the request Host rather than a configured port, so the bundled
+    sandbox works on whatever port the process happens to bind.
+    """
+    if not host:
+        return False
+    origin_host = urlsplit(origin).netloc
+    return bool(origin_host) and origin_host.lower() == host.lower()
+
+
+_origins = _allowed_origins()
+if _origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info("CORS enabled for %d origin(s): %s", len(_origins), ", ".join(_origins))
+else:
+    logger.info("CORS disabled: no ALLOWED_ORIGINS set. Same-origin clients (the bundled "
+                "sandbox) and non-browser MCP agents are unaffected.")
 
 
 def _deliverable_url(request: Request, filename: str) -> str:
     """Build fully qualified public URL for an output artifact."""
     base = str(request.base_url).rstrip("/")
     return f"{base}/outputs/{filename}"
+
+
+def _http_error(exc: Exception) -> HTTPException:
+    """Turn a failure into a 500 without losing it.
+
+    The traceback stays in the server log; the response carries the exception type
+    so an agent can tell a missing layer from a bad coordinate.
+    """
+    logger.exception("Request failed")
+    return HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +192,7 @@ async def health_check():
 # REST API Endpoints (Directly consumed by Supabase Edge Functions & Web UI)
 # ---------------------------------------------------------------------------
 @app.post("/api/survey", tags=["Geospatial Screening"])
-async def run_survey_endpoint(req: SurveyRequest, request: Request):
+def run_survey_endpoint(req: SurveyRequest, request: Request):
     """
     Execute comprehensive multi-criteria screening (Water, Minerals, Soil, Hazard)
     for any coordinate in Africa and return structured intelligence.
@@ -171,11 +227,11 @@ async def run_survey_endpoint(req: SurveyRequest, request: Request):
         }
         return res
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _http_error(exc)
 
 
 @app.post("/api/boreholes", tags=["Geospatial Screening"])
-async def get_boreholes_endpoint(req: TargetRequest, request: Request):
+def get_boreholes_endpoint(req: TargetRequest, request: Request):
     """
     Retrieve ranked precision borehole drilling coordinates, groundwater potential,
     and recommended geophysical confirmation steps (VES/ERT).
@@ -187,11 +243,11 @@ async def get_boreholes_endpoint(req: TargetRequest, request: Request):
         data["map_url"] = _deliverable_url(request, "groundwater_potential_map.png")
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _http_error(exc)
 
 
 @app.post("/api/minerals", tags=["Geospatial Screening"])
-async def get_minerals_endpoint(req: TargetRequest, request: Request):
+def get_minerals_endpoint(req: TargetRequest, request: Request):
     """
     Screen shear-zone gold prospectivity, hydrothermal alteration (iron oxide, gossan, hydroxyl),
     and ranked exploration targets.
@@ -203,11 +259,11 @@ async def get_minerals_endpoint(req: TargetRequest, request: Request):
         data["map_url"] = _deliverable_url(request, "mineral_prospectivity_map.png")
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _http_error(exc)
 
 
 @app.post("/api/soil", tags=["Geospatial Screening"])
-async def get_soil_endpoint(req: TargetRequest, request: Request):
+def get_soil_endpoint(req: TargetRequest, request: Request):
     """
     Assess agricultural land capability, soil moisture (NDMI), and erosion risk zoning.
     """
@@ -218,11 +274,11 @@ async def get_soil_endpoint(req: TargetRequest, request: Request):
         data["map_url"] = _deliverable_url(request, "soil_capability_map.png")
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _http_error(exc)
 
 
 @app.post("/api/hazard", tags=["Geospatial Screening"])
-async def get_hazard_endpoint(req: TargetRequest, request: Request):
+def get_hazard_endpoint(req: TargetRequest, request: Request):
     """
     Multi-hazard exposure screening (flood ponding, slope failure, erosion, wildfire, drought)
     and safest buildable sites.
@@ -234,27 +290,31 @@ async def get_hazard_endpoint(req: TargetRequest, request: Request):
         data["map_url"] = _deliverable_url(request, "hazard_risk_map.png")
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _http_error(exc)
 
 
 @app.get("/api/dossier", tags=["Reports & Deliverables"])
-async def get_dossier_endpoint():
+def get_dossier_endpoint():
     """Retrieve the master cross-category site intelligence dossier JSON."""
     dossier_path = cfg.OUT / "master_site_dossier.json"
     if not dossier_path.exists():
         from src.report import generate_site_dossier
-        return generate_site_dossier()
+        # Regenerating reads whatever AOI src.config currently points at, so it
+        # must not overlap a survey in flight.
+        with _SITE_LOCK:
+            return generate_site_dossier()
     with open(dossier_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 @app.get("/api/report", tags=["Reports & Deliverables"])
-async def get_report_endpoint():
+def get_report_endpoint():
     """View the standalone HTML Executive Intelligence Dossier directly in the browser."""
     html_path = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
     if not html_path.exists():
         from src.report import generate_site_dossier
-        generate_site_dossier()
+        with _SITE_LOCK:
+            generate_site_dossier()
     return FileResponse(html_path, media_type="text/html")
 
 
@@ -268,12 +328,53 @@ app.mount("/outputs", StaticFiles(directory=str(cfg.OUT), html=True), name="outp
 # ---------------------------------------------------------------------------
 # MCP SSE Mounting (Mounted at root so /sse and /messages/ are live for AI agents)
 # ---------------------------------------------------------------------------
-# Permissive transport security allows Render proxies and external AI agents
+def _mcp_allowed_origins() -> set[str]:
+    """Cross-origin browser callers of the MCP SSE transport.
+
+    A page calling its own host is always accepted (see _OriginGuard), so this list only
+    needs the extra origins an operator configures. Native agents (Claude Desktop, Cursor)
+    send no Origin header and never reach this check.
+    """
+    return set(_origins)
+
+
+class _OriginGuard:
+    """Reject foreign browser origins before the MCP app sees them.
+
+    The SDK applies `allowed_origins` only when DNS-rebinding protection is enabled, and
+    that protection also requires whitelisting the deployment hostname -- which a reverse
+    proxy makes a separate, riskier decision. Origin policy is enforced here instead, so
+    the MCP surface is never wildcarded regardless of that flag.
+    """
+
+    def __init__(self, app, allowed: set[str]):
+        self.app = app
+        self.allowed = allowed
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = Headers(scope=scope)
+            origin = headers.get("origin")
+            if origin and origin not in self.allowed and not _is_same_origin(origin, headers.get("host")):
+                logger.warning("MCP transport refused Origin %s", origin)
+                await Response("Invalid Origin header", status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+# DNS rebinding protection stays off until ALLOWED_HOSTS names the real hostnames --
+# turning it on blind would reject Render's proxy hop.
+_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
+_mcp_origins = _mcp_allowed_origins()
 transport_sec = TransportSecuritySettings(
-    enable_dns_rebinding_protection=False,
-    allowed_hosts=["*"],
-    allowed_origins=["*"],
+    enable_dns_rebinding_protection=bool(_hosts),
+    allowed_hosts=_hosts or ["*"],
+    allowed_origins=sorted(_mcp_origins),
 )
-sse_app = mcp.sse_app(transport_security=transport_sec)
+logger.info("MCP SSE transport: same-origin always allowed, cross-origin %s; "
+            "DNS rebinding protection %s",
+            ", ".join(sorted(_mcp_origins)) or "none (set ALLOWED_ORIGINS to add)",
+            "on for " + ", ".join(_hosts) if _hosts else "off (set ALLOWED_HOSTS to enable)")
+sse_app = _OriginGuard(mcp.sse_app(transport_security=transport_sec), _mcp_origins)
 app.mount("", sse_app)
 

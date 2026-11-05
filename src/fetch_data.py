@@ -100,8 +100,8 @@ def fetch(name: str, coverage: str, stamp: str | None = None, projected: bool = 
                 if ds.width > 0 and ds.height > 0:
                     print(f"[cache] {name:12s} ({out.stat().st_size / (1024*1024):.1f} MB)")
                     return out
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[cache] {name:12s} cached file unreadable, re-fetching: {type(exc).__name__}: {exc}")
 
     url = _url(coverage, cfg.BBOX_WGS84, stamp, projected, target_crs)
     success = _download(url, out, retries, optional)
@@ -149,6 +149,7 @@ def fetch_all(
     # 6. CHIRPS Monthly Rainfall (2023-2024 sample)
     months = [(y, m) for y in (2023, 2024) for m in range(1, 13)]
     cube, transform, crs = [], None, None
+    unreadable_months = []
     for y, m in months:
         f = fetch(f"rain_{y}{m:02d}", "rainfall_chirps_monthly",
                   f"{y}-{m:02d}-01T00:00:00.000Z", optional=True,
@@ -158,8 +159,11 @@ def fetch_all(
                 with rasterio.open(f) as ds:
                     cube.append(ds.read(1).astype("float32"))
                     transform, crs = ds.transform, ds.crs
-            except Exception:
-                pass
+            except Exception as exc:
+                unreadable_months.append(f"{y}-{m:02d} ({type(exc).__name__})")
+    if unreadable_months:
+        print(f"[warn] {len(unreadable_months)} downloaded month(s) could not be read and are "
+              f"excluded from the rainfall mean: {', '.join(unreadable_months)}")
 
     rain_mean_path = cfg.RAW / "rain_mean.tif"
     if cube and (force or not rain_mean_path.exists()):

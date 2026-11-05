@@ -20,24 +20,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import src.config as cfg
 
 
-def _load_json_safe(path: Path) -> dict | None:
+def _load_category(path: Path) -> tuple[dict | None, str]:
+    """Load a category summary and say *why* it is absent.
+
+    A corrupt or unreadable file must not report as "analysis not run": the two
+    need different remedies, and downstream readers only see the JSON.
+    """
     if not path.exists():
-        return None
+        return None, "not_run"
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+            data = json.load(f)
+    except Exception as e:
+        return None, f"unreadable ({type(e).__name__}: {e})"
+    if not isinstance(data, dict):
+        return None, f"unexpected structure ({type(data).__name__})"
+    return data, "loaded"
 
 
-def _img_to_base64_src(path: Path) -> str | None:
+def _img_to_base64_src(path: Path) -> tuple[str | None, str]:
+    """Embed a map as base64, or explain why the panel will be blank."""
     if not path.exists():
-        return None
+        return None, "map file not produced"
     try:
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"map file unreadable ({type(e).__name__}: {e})"
+    if not encoded:
+        return None, "map file is empty"
+    return f"data:image/png;base64,{encoded}", "embedded"
 
 
 def generate_site_dossier(
@@ -56,10 +67,10 @@ def generate_site_dossier(
     print(f"Target: ({cfg.TARGET_LAT:.5f}, {cfg.TARGET_LON:.5f}) | Client: {cfg.CLIENT}")
     print("=" * 65)
 
-    water_data = _load_json_safe(cfg.OUT / "summary.json")
-    minerals_data = _load_json_safe(cfg.OUT / "mineral_summary.json")
-    soil_data = _load_json_safe(cfg.OUT / "soil_summary.json")
-    hazard_data = _load_json_safe(cfg.OUT / "hazard_summary.json")
+    water_data, water_status = _load_category(cfg.OUT / "summary.json")
+    minerals_data, minerals_status = _load_category(cfg.OUT / "mineral_summary.json")
+    soil_data, soil_status = _load_category(cfg.OUT / "soil_summary.json")
+    hazard_data, hazard_status = _load_category(cfg.OUT / "hazard_summary.json")
 
     # 1. Build Master JSON Dossier
     dossier = {
@@ -71,6 +82,12 @@ def generate_site_dossier(
         "target_coordinates": {
             "latitude": cfg.TARGET_LAT,
             "longitude": cfg.TARGET_LON,
+        },
+        "category_status": {
+            "groundwater": water_status,
+            "minerals": minerals_status,
+            "soil_land": soil_status,
+            "hazard_safety": hazard_status,
         },
         "executive_scorecard": {},
         "categories": {},
@@ -171,19 +188,39 @@ def generate_site_dossier(
 
 def _build_html_report(dossier: dict) -> str:
     """Build a standalone, beautifully styled HTML intelligence dossier."""
+    def cand(section: dict, key: str) -> dict:
+        """The dossier stores null when a survey found no candidate; rendering must
+        survive that rather than crashing on None.get for a data-poor scene."""
+        return section.get(key) or {}
+
     sc = dossier.get("executive_scorecard", {})
     gw = sc.get("groundwater", {})
     minerals = sc.get("minerals", {})
     soil = sc.get("soil_land", {})
     haz = sc.get("hazard_safety", {})
 
-    # Convert map images to base64 for complete offline portability
-    img_gw_map = _img_to_base64_src(cfg.OUT / "groundwater_potential_map.png")
-    img_gw_zoom = _img_to_base64_src(cfg.OUT / "site_zoom_map.png")
-    img_min_map = _img_to_base64_src(cfg.OUT / "mineral_prospectivity_map.png")
-    img_soil_map = _img_to_base64_src(cfg.OUT / "soil_capability_map.png")
-    img_haz_map = _img_to_base64_src(cfg.OUT / "hazard_risk_map.png")
-    img_haz_zoom = _img_to_base64_src(cfg.OUT / "site_hazard_zoom.png")
+    # Convert map images to base64 for complete offline portability.
+    # A panel that cannot be embedded is stated as unavailable with its reason --
+    # a silently missing map reads as "no map was made" to the client.
+    map_specs = [
+        ("Category 1: Groundwater Potential Zones (GWPZ)", "groundwater_potential_map.png", "Groundwater Map"),
+        ("Groundwater Local Siting Zoom (5x5 km)", "site_zoom_map.png", "Groundwater Zoom"),
+        ("Category 2: Mineral Prospectivity & Shear Zones", "mineral_prospectivity_map.png", "Minerals Map"),
+        ("Category 3: Soil & Land Capability Zoning", "soil_capability_map.png", "Soil Map"),
+        ("Category 5: Natural Hazard & Risk Zoning", "hazard_risk_map.png", "Hazard Map"),
+        ("Site Safety & Hazard Zoom (5x5 km)", "site_hazard_zoom.png", "Hazard Zoom"),
+    ]
+    map_panels = []
+    for map_title, map_file, map_alt in map_specs:
+        img_src, img_note = _img_to_base64_src(cfg.OUT / map_file)
+        if img_src:
+            map_panels.append(
+                f'<div class="map-box"><h4>{map_title}</h4><img src="{img_src}" alt="{map_alt}"/></div>')
+        else:
+            map_panels.append(
+                f'<div class="map-box"><h4>{map_title}</h4>'
+                f'<p style="color:#a33; font-size:0.9em;">Map not embedded: {img_note}.</p></div>')
+    maps_html = "\n      ".join(map_panels)
 
     def score_color(val):
         if val is None:
@@ -395,7 +432,7 @@ def _build_html_report(dossier: dict) -> str:
         <div class="big-score" style="color: {score_color(gw.get('cell_score'))};">{gw.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(gw.get('cell_score'))};">{gw.get('cell_class', 'Unknown')}</span>
         <div class="detail-line"><strong>150m Parcel Mean:</strong> {gw.get('parcel_150m_score', 'N/A')}/100 ({gw.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Top Drilling Site:</strong> {gw.get('primary_borehole_candidate', {}).get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>Top Drilling Site:</strong> {cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km away</div>
       </div>
 
       <!-- Minerals -->
@@ -404,7 +441,7 @@ def _build_html_report(dossier: dict) -> str:
         <div class="big-score" style="color: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_class', 'Unknown')}</span>
         <div class="detail-line"><strong>150m Parcel Mean:</strong> {minerals.get('parcel_150m_score', 'N/A')}/100 ({minerals.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Nearest Target:</strong> {minerals.get('primary_mineral_target', {}).get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>Nearest Target:</strong> {cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km away</div>
       </div>
 
       <!-- Soil & Land -->
@@ -413,7 +450,7 @@ def _build_html_report(dossier: dict) -> str:
         <div class="big-score" style="color: {score_color(soil.get('cell_score'))};">{soil.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(soil.get('cell_score'))};">{soil.get('cell_class', 'Unknown')}</span>
         <div class="detail-line"><strong>150m Parcel Mean:</strong> {soil.get('parcel_150m_score', 'N/A')}/100 ({soil.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Prime Land Zone:</strong> {soil.get('primary_agricultural_zone', {}).get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>Prime Land Zone:</strong> {cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km away</div>
       </div>
 
       <!-- Hazard & Risk -->
@@ -422,7 +459,7 @@ def _build_html_report(dossier: dict) -> str:
         <div class="big-score" style="color: {score_color(haz.get('safety_score'))};">{haz.get('safety_score', 'N/A')}</div>
         <span class="score-badge" style="background: {hazard_color(haz.get('hazard_score'))};">Hazard: {haz.get('hazard_score', 'N/A')}/100</span>
         <div class="detail-line"><strong>Classification:</strong> {haz.get('hazard_class', 'N/A')}</div>
-        <div class="detail-line"><strong>Safest Building Site:</strong> {haz.get('primary_safe_build_site', {}).get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>Safest Building Site:</strong> {cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km away</div>
       </div>
 
     </div>
@@ -445,37 +482,37 @@ def _build_html_report(dossier: dict) -> str:
         <tr>
           <td><strong>Groundwater Siting</strong></td>
           <td>#1 Candidate</td>
-          <td>{gw.get('primary_borehole_candidate', {}).get('latitude', 'N/A')}</td>
-          <td>{gw.get('primary_borehole_candidate', {}).get('longitude', 'N/A')}</td>
-          <td>{gw.get('primary_borehole_candidate', {}).get('distance_km', 'N/A')} km</td>
-          <td><strong>{gw.get('primary_borehole_candidate', {}).get('potential_score', 'N/A')}/100</strong></td>
+          <td>{cand(gw, 'primary_borehole_candidate').get('latitude', 'N/A')}</td>
+          <td>{cand(gw, 'primary_borehole_candidate').get('longitude', 'N/A')}</td>
+          <td>{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</td>
+          <td><strong>{cand(gw, 'primary_borehole_candidate').get('potential_score', 'N/A')}/100</strong></td>
           <td>Vertical Electrical Sounding (VES) resistivity verification</td>
         </tr>
         <tr>
           <td><strong>Mineral Exploration</strong></td>
           <td>#1 Target</td>
-          <td>{minerals.get('primary_mineral_target', {}).get('latitude', 'N/A')}</td>
-          <td>{minerals.get('primary_mineral_target', {}).get('longitude', 'N/A')}</td>
-          <td>{minerals.get('primary_mineral_target', {}).get('distance_km', 'N/A')} km</td>
-          <td><strong>{minerals.get('primary_mineral_target', {}).get('prospectivity_score', 'N/A')}/100</strong></td>
+          <td>{cand(minerals, 'primary_mineral_target').get('latitude', 'N/A')}</td>
+          <td>{cand(minerals, 'primary_mineral_target').get('longitude', 'N/A')}</td>
+          <td>{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</td>
+          <td><strong>{cand(minerals, 'primary_mineral_target').get('prospectivity_score', 'N/A')}/100</strong></td>
           <td>Ground geological mapping & soil geochemical sampling</td>
         </tr>
         <tr>
           <td><strong>Soil & Agriculture</strong></td>
           <td>#1 Zone</td>
-          <td>{soil.get('primary_agricultural_zone', {}).get('latitude', 'N/A')}</td>
-          <td>{soil.get('primary_agricultural_zone', {}).get('longitude', 'N/A')}</td>
-          <td>{soil.get('primary_agricultural_zone', {}).get('distance_km', 'N/A')} km</td>
-          <td><strong>{soil.get('primary_agricultural_zone', {}).get('capability_score', 'N/A')}/100</strong></td>
+          <td>{cand(soil, 'primary_agricultural_zone').get('latitude', 'N/A')}</td>
+          <td>{cand(soil, 'primary_agricultural_zone').get('longitude', 'N/A')}</td>
+          <td>{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</td>
+          <td><strong>{cand(soil, 'primary_agricultural_zone').get('capability_score', 'N/A')}/100</strong></td>
           <td>Agronomic soil profile test & pH analysis</td>
         </tr>
         <tr>
           <td><strong>Safest Building Site</strong></td>
           <td>#1 Safe Zone</td>
-          <td>{haz.get('primary_safe_build_site', {}).get('latitude', 'N/A')}</td>
-          <td>{haz.get('primary_safe_build_site', {}).get('longitude', 'N/A')}</td>
-          <td>{haz.get('primary_safe_build_site', {}).get('distance_km', 'N/A')} km</td>
-          <td><strong>{haz.get('primary_safe_build_site', {}).get('safety_score', 'N/A')}/100</strong></td>
+          <td>{cand(haz, 'primary_safe_build_site').get('latitude', 'N/A')}</td>
+          <td>{cand(haz, 'primary_safe_build_site').get('longitude', 'N/A')}</td>
+          <td>{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</td>
+          <td><strong>{cand(haz, 'primary_safe_build_site').get('safety_score', 'N/A')}/100</strong></td>
           <td>Geotechnical soil compaction & foundation investigation</td>
         </tr>
       </tbody>
@@ -484,12 +521,7 @@ def _build_html_report(dossier: dict) -> str:
     <!-- Satellite Intelligence Cartography -->
     <div class="section-title">3. High-Resolution Satellite Evidence & Siting Maps</div>
     <div class="maps-grid">
-      {f'<div class="map-box"><h4>Category 1: Groundwater Potential Zones (GWPZ)</h4><img src="{img_gw_map}" alt="Groundwater Map"/></div>' if img_gw_map else ''}
-      {f'<div class="map-box"><h4>Groundwater Local Siting Zoom (5x5 km)</h4><img src="{img_gw_zoom}" alt="Groundwater Zoom"/></div>' if img_gw_zoom else ''}
-      {f'<div class="map-box"><h4>Category 2: Mineral Prospectivity & Shear Zones</h4><img src="{img_min_map}" alt="Minerals Map"/></div>' if img_min_map else ''}
-      {f'<div class="map-box"><h4>Category 3: Soil & Land Capability Zoning</h4><img src="{img_soil_map}" alt="Soil Map"/></div>' if img_soil_map else ''}
-      {f'<div class="map-box"><h4>Category 5: Natural Hazard & Risk Zoning</h4><img src="{img_haz_map}" alt="Hazard Map"/></div>' if img_haz_map else ''}
-      {f'<div class="map-box"><h4>Site Safety & Hazard Zoom (5x5 km)</h4><img src="{img_haz_zoom}" alt="Hazard Zoom"/></div>' if img_haz_zoom else ''}
+      {maps_html}
     </div>
 
     <!-- Regulatory / Engineering Disclaimer -->

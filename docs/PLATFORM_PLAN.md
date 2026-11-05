@@ -1,457 +1,382 @@
-# SiteSurveyor AI — Platform Capability Plan
+# SiteSurveyor AI — Platform & MCP Server Plan (v2)
 
-**Project**: SiteSurveyor AI  
-**Organization**: Eineva Labs  
-**Date**: 2026-11-05  
-**Status**: Planning Phase  
+**Project**: SiteSurveyor AI · **Organization**: Eineva Labs
+**Date**: 2026-11-05 · **Status**: Planning · **Supersedes**: v1 (10-category monolith plan)
 
----
+**What v2 changes**
 
-## Executive Summary
-
-SiteSurveyor AI is a satellite-derived geospatial intelligence platform that transforms raw Earth observation data into actionable, site-specific **screening-level** decision reports. Capabilities are generated primarily from optical, radar/SAR, thermal, and elevation imagery, but high-confidence decisions require field validation such as geophysical surveys, soil sampling, drilling, or professional engineering assessment.
-
-The platform accepts a single GPS coordinate and an Area of Interest (AOI) radius, then produces a comprehensive **Site Intelligence Report** scoring the location across up to 10 analysis domains.
+1. The product is redefined as **an MCP tool surface for AI agents**, not a survey script that also exposes MCP. Tools are composable GIS primitives the model can reason over, not four black-box engines that return file paths.
+2. Every capability is now classified against the **verified Digital Earth Africa WCS catalog** (48 coverages, read live from `GetCapabilities`/`DescribeCoverage` on 2026-11-05). v1 assumed ASTER, MODIS, VIIRS, Sentinel-1 and OSM as if they were on tap. Some are; several are not.
+3. Adds the missing engineering layer: async jobs, per-job isolation, token-budgeted responses, error taxonomy, provenance, and a validation ledger.
+4. Adds a Phase 0 that fixes the defects which make the current build unsafe to expose to a model or a client at all.
 
 ---
 
-## Satellite Data Sources
+## 1. Product definition
 
-All processing draws from freely available or low-cost satellite archives:
+A **geospatial analysis server for AI models**. An agent (Claude, Cursor, ChatGPT, or a vertical app) asks questions about a location in Africa; SiteSurveyor acquires Earth-observation data, computes analysis layers, and returns structured evidence the agent can reason about and cite. The human-facing report is one output of that surface, not the purpose of it.
 
-| Source | Type | Resolution | Key Bands / Products |
-|:---|:---|:---|:---|
-| Sentinel-2 MSI | Optical (VNIR-SWIR) | 10–20 m | B2, B3, B4, B8, B8A, B11, B12 |
-| Landsat 8/9 OLI + TIRS | Optical + Thermal | 30 m (100 m thermal) | VNIR, SWIR, LST |
-| ALOS PALSAR / PALSAR-2 | L-Band SAR | 25 m | HH, HV polarizations |
-| Sentinel-1 | C-Band SAR | 10 m | VV, VH polarizations |
-| Copernicus DEM GLO-30 | Elevation | 30 m | Height above ellipsoid |
-| ASTER | VNIR-SWIR-TIR | 15–90 m | 14 bands (mineralogy, thermal) |
-| ESA WorldCover | Land Classification | 10 m | 11 land cover classes |
-| CHIRPS | Rainfall | ~5 km | Monthly precipitation; regional context, not parcel-scale measurement |
-| Landsat WOfS | Water Observations | 30 m | All-time water frequency |
-| MODIS | Multispectral + Thermal | 250 m–1 km | Day/night LST, NDVI, albedo; regional-to-landscape context |
-| VIIRS Nightlights | Nighttime Radiance | 500 m | Settlement and activity context |
+**Input**: a point, a radius, or a **polygon** (parcel / farm boundary / claim). Polygon input is added in v2 — a site surveyor's real input is a cadastral boundary, and point+radius is why current results ignore shape.
 
-**Primary API**: Digital Earth Africa (DE Africa) Sandbox WCS 2.1.0  
-**Supplementary APIs**: NASA POWER, Google Earth Engine, USGS EarthExplorer
+**Output**: machine-readable evidence (values, rasters-as-references, uncertainty, provenance) plus optional rendered artifacts (map, KMZ, PDF) behind download URLs.
+
+**Non-goals** (v1 drifted into all of these)
+
+- Not a replacement for a geophysical survey, assay, soil laboratory, or professional engineering sign-off.
+- Not a general GIS. No digitising, topology editing, or cartographic production house.
+- Not a real-time/monitoring platform. Analysis latency is minutes; nothing here is streaming.
+- Not global. DE Africa WCS serves roughly lon −30…66, lat −56…41. Outside that, the correct answer is `out_of_coverage`, not a degraded guess.
 
 ---
 
-## The 10 Capability Categories
+## 2. Design principles for an MCP-first surface
+
+These are the rules that make the difference between "MCP added on" and "actually usable by a model".
+
+| # | Principle | Consequence |
+|:--|:----------|:------------|
+| P1 | **Primitives, not products** | Expose `slope`, `twi`, `ndvi_timeseries`, `lineaments`, `score`, `rank_sites` separately so the agent can build and interrogate an analysis instead of trusting one call. |
+| P2 | **Discovery before execution** | `list_layers` / `describe_layer` / `check_coverage` are cheap and synchronous. The agent plans against what actually exists for its geometry and date before asking for compute. |
+| P3 | **Self-describing evidence** | Every value carries units, EPSG code, source dataset + timestamp, processing version. A number without provenance cannot be cited and should not be returned. |
+| P4 | **Async for anything >5 s** | `job_id` + `get_job` with progress and partial results. A model must never hold a tool call open for four minutes, and a timeout that discards a completed run is the worst outcome. |
+| P5 | **Token budget is a first-class constraint** | Default `detail="brief"`, capped `max_items`, no base64 inside JSON, rasters returned as references not pixels. A 200 KB tool response degrades the agent's reasoning more than a missing layer would. |
+| P6 | **Errors the model can act on** | Typed reasons (`out_of_coverage`, `no_data_in_period`, `layer_unavailable`, `quota_exceeded`, `invalid_geometry`) with a suggested next call. A raw Python traceback in `detail` (current [src/api.py:174](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/api.py#L174)) gives the agent nothing and leaks internals. |
+| P7 | **Never silently substitute data** | If a requested layer is missing, say so and degrade *explicitly*. Current behaviour swaps in a different proxy with different units ([src/engines/hazard.py:99-100](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/engines/hazard.py#L99-L100)) — undetectable by the agent. |
+| P8 | **Claim ceiling travels with the result** | Each response states the strongest defensible claim ("prioritisation only; no yield, grade, or legal assertion") and the agent must restate it. This is how the product avoids the "precision borehole" failure mode. |
+| P9 | **Bounded tool count** | ~15 tools with rich parameters, not 60 micro-tools. Past that, agent tool-selection accuracy drops, and you pay for it in every conversation. |
+| P10 | **Determinism** | Same params + same data version ⇒ same output. No RNG reseeding inside library calls ([src/utils/classification.py:28](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/utils/classification.py#L28)); no per-AOI percentile stretching masquerading as an absolute score. |
 
 ---
 
-### 🔵 Category 1: WATER — Groundwater & Surface Water Intelligence
+## 3. Verified service constraints
 
-> *"Where do I drill? Will it last? How much will I get?"*
+Confirmed against the live WCS on 2026-11-05. Design around these; don't discover them in production.
 
-**Target Buyers**: Homeowners, farmers, NGOs, rural councils, drilling contractors
+- **Service**: `https://ows.digitalearth.africa/wcs`, WCS 2.0.1/2.1.0, 48 coverages.
+- **Formats**: `image/geotiff`, `application/x-netcdf` only. No COG, no tiles, no vector output.
+- **CRS the service will serve**: **EPSG:3857, EPSG:4326, EPSG:6933**. Arbitrary UTM zones are *not* offered. The existing design — download in the coverage's native CRS, warp locally to the site's UTM grid ([src/config.py:160-191](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/config.py#L160-L191)) — is therefore **correct and should be kept**. Native CRS differs per coverage (4326 for ALOS/S1/DEM/CHIRPS/WSF, 6933 for GeoMAD/WOfS/FC/WorldCereal, 3857 for Landsat SR/ST), so axis subsetting (`Lat/Long` vs `x/y`) must be resolved per coverage from metadata rather than hardcoded.
+- **Band indices are provider-side properties.** Verified orderings:
 
-#### Capabilities
+| Coverage | Bands (1-based, in order) |
+|:--|:--|
+| `wofs_ls_summary_alltime` | `count_wet`, `count_clear`, `frequency` |
+| `gm_s2_annual` | blue, green, **red(3)**, red_edge_1-3, **nir(7)**, nir_narrow, **swir_1(9)**, **swir_2(10)**, smad, emad, bcmad, count |
+| `fc_ls_summary_annual` | pv 10/50/90(1-3), npv 10/50/90(4-6), bs 10/50/90(7-9), count_valid(10) |
+| `alos_palsar_mosaic` | hh, **hv(2)**, **mask(3)**, date, linci |
+| `s1_rtc` | vv, vh, **angle(3)**, area, **mask(5)** |
+| `s2_l2a` | coastal_aerosol, blue, green, red, red_edge_1-3, nir, nir_narrow, water_vapour, swir_1, swir_2, AOT, SAWV, mask |
+| `ls8_sr` / `ls9_sr` | blue, green, red, nir, swir_1, swir_2, pq, aerosol_level |
+| `ls8_st` / `ls9_st` | st, st_qa, pq |
+| `srtm_deriv` | slope, mrrtf, mrvbf |
+| `ndvi_anomaly` | ndvi_std_anomaly, ndvi_mean, clear_count |
+| `wq_annual` | fai, hue, ndvi, owt, CHLA, clear_water, st_max, st_median, st_min, TSI, TSM, water_mask |
+| `wsf_evolution` | wsfevolution, idc_score |
+| `io_lulc_v2` | supercell (11-class LULC, time-selectable) |
+| `crop_mask` | **mask(1)**, **prob(2)**, filtered(3) |
+| `dem_cop_30` | elevation |
+| `esa_worldcover_2021`, `esa_worldcereal_*` | classification |
 
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 1.1 | **Structural Fracture & Fault Mapping** | ALOS PALSAR (HV) + Copernicus DEM | Canny edge detection + Probabilistic Hough Transform on fused SAR backscatter and DEM hillshade; directional fracture density (km/km²) |
-| 1.2 | **Topographic Wetness Index (TWI)** | Copernicus DEM | Sink filling → D8/D-infinity flow accumulation → TWI = ln(A / tan β) |
-| 1.3 | **Drainage Density & Stream Network** | Copernicus DEM | Flow accumulation thresholding → Strahler ordering → kernel density (km/km²) |
-| 1.4 | **Land Cover Infiltration Capacity** | ESA WorldCover 2021 | Reclassification of 11 land cover classes into infiltration capacity scores (0–1) |
-| 1.5 | **Rainfall Recharge Estimation** | CHIRPS Monthly | Multi-year mean annual precipitation; wet/dry season ratio |
-| 1.6 | **Vegetation Moisture Proxy (NDVI / NDMI)** | Sentinel-2 (B4, B8, B11) | NDVI = (NIR − Red) / (NIR + Red); NDMI = (NIR − SWIR1) / (NIR + SWIR1) |
-| 1.7 | **Perennial vs. Seasonal Aquifer Differentiation** | Sentinel-2 / Landsat time-series | Multi-year dry-season (Oct/Nov) NDMI and NDWI analysis; phreatophyte detection via persistent green anomalies |
-| 1.8 | **Weathering / Regolith Proxy Mapping** | DEM + ALOS PALSAR | Terrain curvature + surface roughness + radar backscatter indicators; requires geological or borehole validation and does not directly measure thickness |
-| 1.9 | **Contamination Risk Buffering** | DEM + WorldCover | Slope-directed contamination flowpath modeling from pit latrines, kraals, cemeteries; automated 30 m+ exclusion buffers |
-| 1.10 | **Small Dam & Weir Siting** | Copernicus DEM | Micro-catchment delineation → valley bottleneck detection → storage-to-wall volume ratio optimization |
-| 1.11 | **Wetland & Spring Discharge Detection** | Landsat TIRS + Sentinel-2 | Dry-season thermal anomaly (cool spots) + persistent NDWI positive zones |
-| 1.12 | **Apparent Thermal Inertia (ATI) Screening** | MODIS / Landsat TIRS | ATI = (1 − Albedo) / ΔT; highlights relative moisture and material contrasts, not direct groundwater depth or saturation |
-| 1.13 | **Candidate Borehole Site Ranking** | All above layers | Weighted multi-criteria overlay (AHP) → natural breaks classification → local peak picking with spacing constraints |
-
-#### Output Products
-- `groundwater_potential_zones.tif` — Classified raster (Very Low → Very High)
-- `gwpz_index.tif` — Continuous 0–100 index
-- `candidate_borehole_sites.csv` / `.geojson` — Ranked GPS coordinates
-- `groundwater_potential_map.png` — Cartographic map (220 dpi)
-- `evidence_layers.png` — All input layers visualized
-- `site_zoom_map.png` — 5×5 km detail around target
-- `contamination_exclusion_zones.geojson` — No-drill buffer polygons
-
----
-
-### 🟡 Category 2: MINERALS — Exploration & Prospectivity Targeting
-
-> *"Where should I dig? Where are the reefs and shears?"*
-
-**Target Buyers**: Junior miners, artisanal syndicates, exploration companies, claim holders
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 2.1 | **Structural Lineament Density** | ALOS PALSAR (HV) + DEM hillshade | Canny + Hough on SAR/hillshade fusion; density in km/km² |
-| 2.2 | **Lineament Intersection & Dilational Jog Detection** | Derived from 2.1 | Cross-cutting points with >20° angular disparity; kernel density of intersection nodes |
-| 2.3 | **Iron Oxide / Gossan Detection** | Sentinel-2 (B2, B4, B11) | Gossan Index = (SWIR1/Red) × (Red/Blue); Band ratio B4/B2 |
-| 2.4 | **Hydroxyl / Clay Alteration (Crosta PCA)** | Sentinel-2 (B2, B4, B11, B12) | PCA on 4-band subset; extract eigenvector with opposing SWIR1 vs SWIR2 loadings |
-| 2.5 | **Ferrous / Mafic Mineral Index** | Sentinel-2 (B8, B11) | SWIR1/NIR ratio with NDVI residual correction |
-| 2.6 | **Quartz & Silicification Index** | ASTER TIR (B10, B11, B12) | Silica Index = B11² / (B10 × B12); quartz vein outcrop detection |
-| 2.7 | **Pegmatite and Alteration Screening** | Sentinel-2 SWIR / ASTER SWIR | B12/B11 and B8A/B11 ratios for alteration and lithologic contrasts; lithium presence requires field spectroscopy, sampling, and laboratory assays |
-| 2.8 | **Ultramafic Prospectivity Screening** | Sentinel-2 + ASTER | Mg-OH and ferrous/hydroxyl contrasts used to prioritize targets; commodity presence and grade require geological mapping and assays |
-| 2.9 | **Alluvial & Placer Gold Trap Mapping** | Copernicus DEM | Stream Power Index (SPI) = As × tan(β); Sediment Transport Index (STI); hydraulic drop zone detection |
-| 2.10 | **Structural Strike Rose Diagram** | Derived from 2.1 | Azimuth computation of all lineament segments; binned orientation histogram |
-| 2.11 | **Vegetation Residual Correction** | Sentinel-2 (B4, B8) | Polynomial regression of alteration indices against NDVI to remove false anomalies from green canopy |
-| 2.12 | **Known Deposit Proximity (Endowment Context)** | USGS MRDS + curated databases | Distance-decay context from documented mines and occurrences; incomplete public records must be reported as a limitation |
-
-#### Output Products
-- `mineral_prospectivity_zones.tif` — Classified raster per commodity
-- `mineral_prospectivity_index.tif` — Continuous 0–100 index
-- `candidate_targets.csv` / `.geojson` — Ranked exploration targets
-- `alteration_map.png` — Hydrothermal alteration composite
-- `structural_map.png` — Lineaments, intersections, and rose diagram
-- `evidence_layers.png` — All input layers
+  **Correction to the earlier code review**: the hardcoded indices in use *are* right — WOfS band 3 = `frequency`, the GeoMAD 3/7/9/10 reads, ALOS band 2 = `hv`, FC 6/8 = `npv_pc_90`/`bs_pc_50`, and `crop_mask` band 2 = `prob` all verify against a live DescribeCoverage. The requirement is still to resolve bands **by name**, because those orderings are the provider's to change.
+  The FC comment that claimed "band 5 = NPV median" while the code read band 6 has been corrected in [src/engines/hazard.py:98](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/engines/hazard.py#L98) and [src/engines/soil.py:140](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/engines/soil.py#L140) — comment was wrong, code was right.
+- **Quality flags that exist and are ignored**: ALOS `mask`, S1 `mask`, S2 `mask`, Landsat `pq` / `st_qa`, FC `count_valid`(10), WOfS `count_clear`/`count_wet`, GeoMAD `count`(14), `ndvi_anomaly` `clear_count`. These are the cloud/no-data guards that would explain the NaN halos reaching the score. Fetching them is cheaper than inferring validity from the data values themselves.
+- **Single-date mosaics**: `alos_palsar_mosaic` (2007) and `jers_sar_mosaic` (1992-98) are fixed stamps — structure, not change detection or SAR time-series texture.
+- **Resolution floor**: nothing finer than ~10 m optical / 30 m SAR-DEM; CHIRPS is ~5.5 km. Any deliverable claiming metre-scale siting must state its own uncertainty radius.
+- **Not on this service** (source elsewhere or descope): ASTER TIR, MODIS, VIIRS nightlights, S2 level-1C radiance, lithology/structural maps, borehole registers, soil laboratory grids, cadastral parcels, OSM, protected-area polygons, transaction/price data.
 
 ---
 
-### 🟤 Category 3: SOIL & LAND — Agricultural Suitability Mapping
+## 4. MCP tool surface (target design)
 
-> *"Is this land worth buying? What can I grow on it?"*
+`transport`: **stdio** for local agents, **Streamable HTTP** for cloud (SSE is the legacy path in the MCP spec — keep it only for compatibility). Heavy handlers are `async` and delegate to a worker; nothing long-running executes inside the request path.
 
-**Target Buyers**: Agri-investors, commercial farmers, land buyers, tobacco/horticulture operations, diaspora purchasers
+### T0 — Discovery (sync, <300 ms)
 
-#### Capabilities
+| Tool | Returns |
+|:--|:--|
+| `list_layers(theme?, region?)` | coverage ids, theme, native CRS, resolution, temporal extent, bbox |
+| `describe_layer(layer_id)` | band names + units, nil values, native CRS, grid limits, valid timestamps |
+| `check_coverage(geometry, layers, period?)` | availability per layer, tile/size estimate, expected latency + cost, and *why not* when unavailable |
 
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 3.1 | **Soil Moisture Capacity Index** | Sentinel-1 (VV/VH) + Sentinel-2 | SAR backscatter decomposition (moisture vs roughness) fused with optical NDMI |
-| 3.2 | **Soil Organic Carbon Proxy** | Sentinel-2 (bare-soil pixels) | Bare Soil Index + spectral darkness in SWIR; correlation with organic matter content |
-| 3.3 | **Erosion Susceptibility (RUSLE LS-Factor)** | Copernicus DEM | LS = (Flow Accumulation × Cell Size / 22.13)^0.4 × (sin(slope) / 0.0896)^1.3 |
-| 3.4 | **Gully Hazard Mapping** | DEM + Sentinel-2 time-series | Stream Power Index thresholding + bare-soil expansion detection |
-| 3.5 | **Irrigation Suitability Zonation** | DEM + CHIRPS + WorldCover | Slope classes (<2%, 2–5%, 5–8%, >8%) × water proximity × rainfall adequacy |
-| 3.6 | **Crop Type Zonation** | CHIRPS + DEM + WorldCover | Rainfall regime + elevation + aspect + frost risk → suitability matrix per crop |
-| 3.7 | **Frost Hollow & Cold Air Drainage** | Copernicus DEM | Topographic depression detection; cold air pooling modeling via inverted flow accumulation |
-| 3.8 | **Waterlogging & Drainage Impediment** | DEM TWI + Sentinel-1 | Persistent high TWI zones + SAR wet-season backscatter anomalies |
+### T1 — Acquisition (async, 10 s–5 min)
 
-#### Output Products
-- `agricultural_suitability_zones.tif` — Classified raster
-- `soil_quality_index.tif` — Continuous 0–100 composite
-- `erosion_risk_map.png` — RUSLE LS-factor visualization
-- `irrigation_zones.geojson` — Irrigable land polygons
-- `crop_suitability_matrix.json` — Per-crop scoring
+`fetch(geometry, layers, resolution?, period?, force?)` → `job_id`. Per-job workspace; content-addressed cache keyed on (coverage, version, geometry, period, resolution). Returns resolved band table plus the real post-warp resolution and valid-pixel fraction.
 
----
+### T2 — Analysis primitives (async, 5 s–90 s each)
 
-### 🟢 Category 4: VEGETATION & BIOMASS — Rangeland, Forestry & Carbon
+| Tool | Parameters | Notes |
+|:--|:--|:--|
+| `terrain` | dem_id, metrics: slope, aspect, hillshade, plan/profile curvature, flow_dir, flow_acc, **twi, csv, spi, sti, ltv**, ridge/valley flatness, **catchment_for(pour_point)** | Add the ε increment to sink filling; **buffer the DEM beyond the AOI** so accumulation isn't truncated at the border ([src/utils/terrain.py:103-106](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/utils/terrain.py#L103-L106)). `catchment_for` is new and unlocks flood, dam and mini-hydro honestly. |
+| `spectral` | source_id, indices: ndvi, **ndre**, evi, ndmi, ndwi, mndwi, bsi, iron_oxide, hydroxyl, ferrous, **lst_anomaly**, **evaporative_fraction** | Red-edge (`s2_l2a`) and LST (`ls8_st`) are available and unused. Topographic illumination correction becomes mandatory before alteration mapping in hilly terrain. |
+| `timeseries` | source_id, index, period, stat: median/peak/anomaly, **trend_slope + Mann-Kendall p**, **cv**, seasonal amplitude | The biggest methodological gap in v1 — everything was one static composite. |
+| `surface_water` | method: wofs_frequency / gsw_seasonal / gsw_extents | Water-body polygons + permanence class, not a single scalar. |
+| `sar_structure` | bands (vv,vh,hv), normalise with `angle`, texture (GLCM), backscatter segmentation, lineaments | Canny+Hough stays but is reported as *candidate* linear features with orientation rose, length distribution and a stated false-positive rate. |
+| `classification` | breaks: jenks/manual, masks (water, built-up, cropland), **explicit nodata class** | No-data is its own class — never class 1, never class 5. |
+| `external_context` | osm_distance(roads, power, water), wdpa_overlap, geology_faults, elevation_of_site | Clearly-labelled third-party sources, each with licence and staleness. |
 
-> *"How productive is this land? Is it degrading?"*
+### T3 — Combination (sync, <2 s)
 
-**Target Buyers**: Ranchers, conservancies, forestry operations, carbon credit developers, insurance underwriters
+`score(layers, weights, normalise, constraints[], method)` → score raster **plus** per-layer contribution, one-at-a-time weight perturbation (±50 %), the Spearman correlation matrix between inputs (exposes terrain collinearity), and the pixel count excluded by constraints.
 
-#### Capabilities
+- **Rename AHP.** It is a weighted linear combination until a pairwise matrix, eigenvector derivation and Saaty consistency ratio exist. Build those and the name is earned.
+- **Constraints ≠ low weights.** Floodway, wetland buffer, protected area, upslope contamination sources must *exclude*, not subtract. Fixes the defect where a saturated flood pixel is averaged away by a benign slope.
 
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 4.1 | **Vegetation Productivity Trend (5–10 yr)** | Sentinel-2 / Landsat NDVI archive | Linear regression of annual peak-season NDVI; Mann-Kendall trend significance |
-| 4.2 | **Carrying Capacity Estimation** | Sentinel-2 NDVI + CHIRPS | Biomass proxy (kg DM/ha) from NDVI × rainfall interaction; stocking rate calculation |
-| 4.3 | **Bush Encroachment Detection** | Sentinel-2 + Sentinel-1 | Woody cover fraction change via SAR texture + optical NDVI seasonality separation (woody vs grass) |
-| 4.4 | **Canopy Density & Timber Volume** | Sentinel-1 + Sentinel-2 | SAR backscatter (HV correlates with above-ground biomass) + canopy height proxy |
-| 4.5 | **Carbon Stock Estimation (AGB)** | ALOS PALSAR (HV) + Sentinel-2 | Allometric AGB models calibrated to L-band backscatter; tCO₂/ha output |
-| 4.6 | **Fire Scar History & Burn Frequency** | Sentinel-2 / Landsat NBR | Normalized Burn Ratio time-series; fire return interval mapping |
-| 4.7 | **Land Degradation Neutrality (LDN) Index** | Multi-source composite | UNCCD SDG 15.3.1 framework: productivity + land cover change + soil organic carbon |
+### T4 — Targeting (sync, <2 s)
 
-#### Output Products
-- `vegetation_health_trend.tif` — NDVI trend slope
-- `biomass_map.tif` — Above-ground biomass (tDM/ha)
-- `carbon_stock_map.tif` — Carbon density (tCO₂/ha)
-- `fire_frequency_map.png` — Burn count per pixel
-- `degradation_index.tif` — LDN composite
+`rank_sites(score_raster, k, min_spacing, exclusion_masks, geometry, uncertainty)` → candidates each with `uncertainty_radius_m` (from the coarsest influential layer and local gradient), cluster evidence (neighbouring pixel statistics, not one cell), and travel-surface distance where an access cost surface exists.
+
+### T5 — Delivery (async)
+
+`build_report(job_id, sections[], format: json|html|pdf|kmz|geojson|tif)` → download URLs. `get_job` for status, progress, partial results, artifacts. `list_jobs`, `delete_job` for lifecycle.
+
+### T6 — Feedback (sync)
+
+`record_outcome(job_id, kind: borehole_yield|assay|soil_test|construction|crop, observed, source)` → validation ledger. The only route to a calibrated product, and nearly free to add early.
 
 ---
 
-### 🔴 Category 5: HAZARD & RISK — Natural Disaster & Environmental Risk
+## 5. Response contract
 
-> *"Is this site safe to build on? What could go wrong?"*
+One envelope for every analysis so the agent relies on structure instead of prose.
 
-**Target Buyers**: Insurance companies, banks (collateral assessment), municipal planners, real estate developers, construction firms
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 5.1 | **Flood Inundation Modeling** | DEM + Landsat WOfS | Flow accumulation → flood-prone flat zones + historical water extent overlay |
-| 5.2 | **Landslide Susceptibility** | DEM + CHIRPS + WorldCover | Slope + curvature + lithology proxy + rainfall intensity; logistic regression or weighted overlay |
-| 5.3 | **Soil Liquefaction & Collapsible Soil Risk** | DEM + Sentinel-1 | Alluvial flat detection + SAR moisture anomaly in sandy deposits |
-| 5.4 | **Wildfire Spread Corridor Modeling** | DEM + WorldCover + NDVI | Fuel load (NDVI biomass) × slope × aspect (wind channeling) |
-| 5.5 | **Drought Severity & Frequency Index** | CHIRPS (20+ years) | Standardized Precipitation Index (SPI) at 3, 6, 12-month scales; return period analysis |
-| 5.6 | **Sinkhole / Doline Risk (Karst Terrain)** | Copernicus DEM | Circular depression detection via topographic depression filling; curvature anomalies |
-| 5.7 | **Seismic Proximity Scoring** | USGS earthquake catalog | Distance to historical epicenters + active fault proximity |
-
-#### Output Products
-- `hazard_composite_index.tif` — Combined risk score (0–100, low = safe)
-- `flood_risk_zones.geojson` — Inundation polygons
-- `landslide_susceptibility_map.png` — Classified slope failure risk
-- `drought_frequency.tif` — Return period raster
-- `hazard_report.json` — Per-hazard scoring
-
----
-
-### ⚪ Category 6: INFRASTRUCTURE & CONSTRUCTION — Site Due Diligence
-
-> *"Can I build here? What will it cost?"*
-
-**Target Buyers**: Construction companies, solar/wind developers, telecoms tower planners, road engineers
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 6.1 | **Foundation Suitability Classification** | Sentinel-1 + Sentinel-2 + DEM | SAR roughness (rock vs soil) + spectral classification (clay vs sand vs laterite) |
-| 6.2 | **Cut-and-Fill Volume Estimation** | Copernicus DEM | Target platform elevation → volume above/below existing surface per cell |
-| 6.3 | **Access Road Gradient Analysis** | Copernicus DEM | Least-cost path from nearest road to target; maximum gradient along path |
-| 6.4 | **Infrastructure Proximity Scoring** | WorldCover + OpenStreetMap | Distance to nearest road, power line, settlement, water source |
-| 6.5 | **Borrow Pit / Aggregate Source Detection** | Sentinel-2 + DEM | Exposed rock/gravel outcrop identification via bare-soil spectral indices + roughness |
-| 6.6 | **Solar Farm Terrain Suitability** | Copernicus DEM + WorldCover | Flat (<5°) + south/north-facing (hemisphere-dependent) + non-agricultural + low-shadow zones |
-| 6.7 | **Telecoms Tower Line-of-Sight Analysis** | Copernicus DEM | Viewshed computation from candidate tower locations; coverage radius mapping |
-
-#### Output Products
-- `construction_suitability_zones.tif` — Classified raster
-- `access_route.geojson` — Optimal access path with gradient profile
-- `cut_fill_volume.json` — Earthworks volume estimate
-- `viewshed_coverage.tif` — Line-of-sight binary raster
-
----
-
-### 🟣 Category 7: PROPERTY & REAL ESTATE — Land Valuation Intelligence
-
-> *"What is this plot actually worth?"*
-
-**Target Buyers**: Diaspora buyers purchasing remotely, real estate agents, banks valuing collateral, estate liquidators
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 7.1 | **Composite Land Quality Score** | All categories combined | Weighted combination of water, soil, minerals, hazard, access, energy scores → single 0–100 index |
-| 7.2 | **Change Detection (Before/After)** | Sentinel-2 time-series | Bi-temporal NDVI / NDBI differencing; has the land been stripped, mined, deforested, or built on? |
-| 7.3 | **Boundary Encroachment Detection** | Sentinel-2 + WorldCover | Unauthorized clearing or building expansion across cadastral boundaries |
-| 7.4 | **Neighborhood Development Trajectory** | WorldCover + VIIRS Nightlights | 5-year trend of built-up area expansion + nighttime light intensity growth |
-| 7.5 | **Viewshed & Scenic Value Analysis** | Copernicus DEM | 360° viewshed from property center; visible area, horizon distance, scenic mountain/water features |
-| 7.6 | **Legal Land Use Conflict Screening** | WorldCover + wetland/forest masks | Flags if property overlaps protected wetlands, riparian buffers, or gazetted forest reserves |
-
-#### Output Products
-- `land_quality_score.json` — Composite 0–100 rating with breakdown
-- `change_detection_map.png` — Before/after comparison
-- `development_trajectory.png` — 5-year growth trend visualization
-- `viewshed_map.png` — Visible area from property
-- `property_intelligence_report.pdf` — Branded client document
-
----
-
-### 🟠 Category 8: ENERGY — Renewable Energy & Electrification Siting
-
-> *"Where should I put solar panels, a wind turbine, or a mini-grid?"*
-
-**Target Buyers**: Solar companies, rural electrification agencies, NGOs, off-grid homesteaders
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 8.1 | **Solar Irradiance & Aspect Mapping** | Copernicus DEM + NASA POWER | Slope + aspect → annual insolation (kWh/m²/day); shadow casting from surrounding terrain |
-| 8.2 | **Wind Exposure Corridor Detection** | Copernicus DEM | Ridgeline detection + valley channeling + Topographic Position Index for wind acceleration zones |
-| 8.3 | **Mini-Hydro Head & Flow Estimation** | Copernicus DEM + CHIRPS | Stream gradient × catchment area × mean annual runoff → estimated power (kW) |
-| 8.4 | **Off-Grid Community Clustering** | WorldCover + VIIRS Nightlights | Settlement detection + population density proxy → mini-grid sizing and optimal placement |
-| 8.5 | **Solar Pump Sizing Engine** | DEM + NASA POWER | Irradiance × total dynamic head (elevation lift from borehole to tank) → pump wattage + panel count |
-| 8.6 | **Transmission Line Corridor Optimization** | DEM + WorldCover | Least-cost path avoiding steep slopes, forests, wetlands, and settlements |
-
-#### Output Products
-- `solar_potential_map.tif` — Annual insolation raster
-- `wind_exposure_zones.geojson` — High-wind corridor polygons
-- `minihydro_candidates.csv` — Ranked sites with estimated kW
-- `solar_pump_spec.json` — Pump size, panel count, daily yield
-- `grid_corridor.geojson` — Optimal transmission route
-
----
-
-### 🔵 Category 9: WILDLIFE & CONSERVATION — Habitat & Corridor Mapping
-
-> *"Where are the animals moving? What habitat is left?"*
-
-**Target Buyers**: National parks, conservancies, safari operators, international conservation NGOs, CAMPFIRE programs
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 9.1 | **Habitat Suitability Modeling** | WorldCover + DEM + WOfS | Land cover type + water proximity + terrain ruggedness + human disturbance distance → species-specific HSI |
-| 9.2 | **Wildlife Corridor Connectivity** | DEM + WorldCover | Least-cost path / circuit theory (Circuitscape logic) between protected areas through natural cover |
-| 9.3 | **Poaching Pressure Proxy** | WorldCover + DEM | Road density + settlement proximity + forest cover loss rate → vulnerability index |
-| 9.4 | **Wetland Health & Extent Change** | Landsat WOfS + Sentinel-2 | Multi-decadal water extent change; seasonal vs permanent wetland classification |
-| 9.5 | **Human-Wildlife Conflict Zone Mapping** | WorldCover time-series | Agriculture/settlement expansion rate into wildlife buffer zones; conflict frontier delineation |
-| 9.6 | **Biodiversity Proxy Index** | Sentinel-2 NDVI variability | Coefficient of variation of NDVI as habitat heterogeneity proxy |
-
-#### Output Products
-- `habitat_suitability_index.tif` — Species-specific HSI raster
-- `wildlife_corridors.geojson` — Least-cost path polygons
-- `conflict_zones.geojson` — Encroachment frontier polygons
-- `wetland_change_map.png` — Multi-temporal extent comparison
-- `conservation_report.json` — Summary metrics
-
----
-
-### ⚫ Category 10: URBAN & SETTLEMENT — Planning & Growth Intelligence
-
-> *"Where is the city growing? Where should services go?"*
-
-**Target Buyers**: Municipal councils, urban planners, utility companies, telecoms, humanitarian organizations
-
-#### Capabilities
-
-| # | Capability | Satellite Input | Processing Method |
-|:--|:-----------|:----------------|:------------------|
-| 10.1 | **Informal Settlement Detection & Growth Tracking** | WorldCover + Sentinel-2 time-series | Built-up area classification + temporal expansion rate mapping |
-| 10.2 | **Service Coverage Gap Analysis** | WorldCover + DEM + OSM | Distance from each settlement cluster to nearest borehole, clinic, school, paved road |
-| 10.3 | **Impervious Surface & Stormwater Runoff** | Sentinel-2 NDBI + DEM | Normalized Difference Built-up Index + flow accumulation → urban flood ponding zones |
-| 10.4 | **Urban Heat Island Mapping** | Landsat TIRS | Land Surface Temperature anomaly: built-up areas vs surrounding vegetation/water |
-| 10.5 | **Illegal Land Clearing / Unauthorized Development** | Sentinel-2 bi-temporal change | NDVI loss + bare soil gain detection between two dates |
-| 10.6 | **Population Density Estimation** | VIIRS Nightlights + WorldCover | Nighttime radiance × built-up fraction calibrated to census data |
-
-#### Output Products
-- `settlement_growth_map.tif` — Multi-temporal built-up expansion
-- `service_gap_map.png` — Distance-to-service heatmap
-- `urban_flood_risk.geojson` — Ponding zone polygons
-- `heat_island_map.png` — LST anomaly visualization
-- `urban_intelligence_report.json` — Summary metrics
-
----
-
-## Composite Site Intelligence Report
-
-The ultimate product is a **single-coordinate, multi-domain report** that layers all categories:
-
-```
-┌─────────────────────────────────────────────────────┐
-│           SITE INTELLIGENCE REPORT                  │
-│  Location: 19.5049°S, 29.8460°E                    │
-│  AOI Radius: 12.5 km                               │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  💧  Water Potential          72 / 100   HIGH        │
-│  ⛏️  Mineral Prospectivity    34 / 100   LOW         │
-│  🌾  Agricultural Suitability 81 / 100   VERY HIGH   │
-│  🌿  Vegetation / Biomass     65 / 100   MODERATE    │
-│  🔥  Hazard Risk              12 / 100   LOW (SAFE) │
-│  🏗️  Construction Feasibility 67 / 100   MODERATE   │
-│  🏘️  Property Value Trend     ↑ GROWING             │
-│  ☀️  Solar Energy Potential    88 / 100   VERY HIGH  │
-│  🦁  Conservation Value       45 / 100   MODERATE    │
-│  🏙️  Urban Service Coverage   73 / 100   HIGH       │
-│                                                     │
-│  OVERALL SITE RATING:  68 / 100                     │
-│  DATA CONFIDENCE:      MODERATE                    │
-│                                                     │
-├─────────────────────────────────────────────────────┤
-│  Top 3 Borehole Candidates (GPS)                    │
-│  Top 3 Mineral Targets (GPS)                        │
-│  Hazard Warnings & Exclusion Zones                  │
-│  Recommended Next Steps                             │
-└─────────────────────────────────────────────────────┘
+```json
+{
+  "status": "success",
+  "job_id": "sj_01H...",
+  "geometry": { "crs": "EPSG:32735", "cell_m": 30, "shape": [800, 800] },
+  "result": { "target_cell": { "value": 61.4, "unit": "index_0_100_relative" } },
+  "provenance": [
+    { "layer": "gm_s2_annual/red", "source": "DEA WCS", "period": "2023", "crs": "EPSG:6933",
+      "resampled_from_m": 10, "bands_resolved_by": "name" }
+  ],
+  "data_quality": { "valid_pixel_fraction": 0.93, "nodata_pixels": 13120, "coarse_layers": ["rainfall_chirps_monthly"] },
+  "confidence": { "level": "moderate", "dominant_limitation": "no field validation for this AOI" },
+  "uncertainty": { "spatial_resolution_m": 30, "effective_targeting_radius_m": 1100 },
+  "claim_ceiling": "Prioritisation of investigation sites only. Not a statement of water yield, mineral grade, or buildability.",
+  "score_basis": "relative_to_aoi_percentile",
+  "sensitivity": { "weights_perturbed_50pct_rank_stability": 0.71 },
+  "artifacts": [ { "kind": "tif", "url": "...", "bytes": 1840000 } ],
+  "next_recommended_calls": ["check_coverage", "external_context"]
+}
 ```
 
-Every domain score must include a confidence rating, data acquisition date, spatial resolution, dominant evidence layers, and a short explanation of uncertainty. Composite scores are prioritization aids, not guarantees of water yield, mineral grade, crop yield, property value, or engineering suitability.
-
-## Validation and Uncertainty
-
-The platform must distinguish between **observed measurements**, **derived indicators**, and **screening recommendations**. Reports should:
-
-- Record source dataset versions, acquisition dates, cloud or quality masks, projections, resampling methods, and model parameters.
-- Report confidence separately from the opportunity or risk score.
-- Flag coarse inputs such as CHIRPS, MODIS, and VIIRS when they materially influence a site result.
-- Include a field-verification checklist appropriate to the domain: geophysics and drilling for groundwater, mapping and assays for minerals, soil sampling for agriculture, and professional surveys for construction.
-- Track validation outcomes from boreholes, assays, soil tests, hazard observations, and client feedback for later calibration.
-- Never infer absence of a resource from missing public records or a low satellite score.
-
-Initial validation datasets should be assembled before public launch. At minimum, the water and minerals products need representative known sites, documented outcomes, and acceptance thresholds for ranking accuracy and false-positive rates.
-
-## Minimum Viable Product
-
-The first release should focus on a single-coordinate report containing:
-
-1. Water-potential screening using DEM, Sentinel-1/2, WorldCover, and rainfall context.
-2. Mineral-prospectivity screening using structural and alteration indicators, without claiming commodity grade or deposit confirmation.
-3. Basic flood, slope, and land-cover exclusions.
-4. Ranked priority zones with evidence layers, confidence, data freshness, and field-verification guidance.
-5. GeoJSON, GeoTIFF, PNG, JSON metadata, and a concise PDF report.
-
-The remaining domains should be added only after the MVP has measurable validation results and a documented uncertainty model.
+`score_basis` is mandatory: `absolute_scale` or `relative_to_aoi_percentile`. The current pipeline only produces the latter while the dossier prints `x/100` as if it were the former — an agent will otherwise tell a client that two sites "scored 76 and 41" when the numbers aren't comparable.
 
 ---
 
-## Platform Architecture
+## 6. Domain analyses — with feasibility status
+
+Legend: **A** = computable from DEA WCS today · **B** = needs a named external source · **C** = not feasible, descoped.
+
+### Water (Cat 1)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Fracture/lineament density + orientation | A | ALOS `hv`+`mask`, S1 RTC `vv/vh/angle`, DEM hillshade |
+| TWI, flow accumulation, drainage density | A | after sink-fill ε fix and AOI buffering |
+| Recharge context (rainfall, seasonality) | A | CHIRPS monthly from 1981 → SPI, wet/dry ratio |
+| Vegetation moisture/productivity | A | GeoMAD + `ndvi_anomaly` + `io_lulc_v2` |
+| Perennial vs seasonal groundwater proxy | A | multi-year dry-season NDMI/NDWI from the GeoMAD archive |
+| **Spring / wetland discharge** | A | LST (`ls8_st`) + NDWI + TWI convergence — replaces the MODIS assumption |
+| **Dam & weir siting** | A | `catchment_for` + valley bottleneck + storage:wall ratio |
+| **Surface-water quality near the site** | A | `wq_annual` TSM / CHLA / TSI — new, high client value, no new plumbing |
+| Contamination exclusion buffers | B | needs latrine/kraal/cemetery locations → OSM + client survey points |
+| Regolith / weathering thickness | C | not derivable at these resolutions; expert overlay only |
+| Borehole yield prediction | B | needs a national/District borehole register; until then, ranking only |
+
+### Minerals (Cat 2)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Iron oxide / hydroxyl / ferrous alteration | A | `gm_s2_annual` or `s2_l2a`, bands resolved by name |
+| Structural density, intersections, strike rose | A | lineaments + orientation clustering (already computed, currently unused) |
+| **Terrain flatness for alluvial traps** | A | `srtm_deriv` `mrvbf`/`mrrtf` — purpose-built geomorphic derivatives, unused today |
+| Vegetation residual correction | A | NDVI regression |
+| Quartz/silica & thermal mineralogy | **C** | needs ASTER TIR, which DE Africa does not host — v1 promised this |
+| Known-deposit / endowment context | B | USGS MRDS + national geology; report record completeness as a limitation |
+| Lithology-controlled prospectivity | B | national geological map access; no DEA equivalent |
+| Grade or tonnage | C | never — assay only |
+
+### Soil & land (Cat 3)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Spectral soil proxies (moisture, OC, colour) | A | bare-soil pixels only; disclose as proxy |
+| **Actual soil properties** | **B, new** | **ISRIC SoilGrids**: texture, pH, OC, CEC, rooting depth, drainage class (~250 m). v1 built a whole "soil capability" category without a single soil measurement — this is the highest-value addition in the plan. |
+| Erosion | A+B | RUSLE needs R (CHIRPS-derived erosivity), K (SoilGrids), LS (DEM), C (FC), P (management). With SoilGrids, RUSLE is honest; without it, don't call it RUSLE. |
+| Crop benchmark & validation | A | `esa_worldcereal_maize_main` / `_wintercereals` / `_activecropland` / `_irrigation` — independent cropland truth to score suitability against |
+| Irrigation suitability | A+B | slope + water proximity (OSM/WSF) + WorldCereal irrigation extent |
+| Frost hollows, waterlogging | A | DEM + inverted accumulation + SAR wet/dry backscatter difference |
+| Salinity/sodicity, tenure, EIA category | B | national/provincial sources; tenure is legal data, not satellite data |
+
+### Vegetation, biomass & carbon (Cat 4)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Productivity trend & degradation | A | `ndvi_anomaly`, `ndvi_climatology_ls`, GeoMAD series with Mann-Kendall |
+| Woody cover / bush encroachment | A | `io_lulc_v2` annual classes + S1 VH texture — exactly what this category lacked |
+| Carrying capacity | A+B | NDVI × rainfall, calibrated to published stocking rates |
+| AGB / carbon stock | B | allometry needs field calibration; 2007 L-band HV alone will not give defensible tCO₂/ha for a carbon transaction |
+| Burn history & fire scars | A | NBR differencing across `gm_ls8_ls9_annual` / `gm_s2_annual` years |
+| LDN / SDG 15.3.1 | A+B | framework layers exist; official reference data needed for reporting |
+
+### Hazard (Cat 5)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Flood | A | WOfS/GSW persistence + buffered catchment accumulation + channel morphology — labelled *surface-water persistence*, not design-event inundation |
+| Design flood / return period | B | needs a hydrological model and survey-grade DEM; not offered |
+| Slope failure | A→B | infinite-slope with cohesion/friction/saturation needs soil + lithology; slope-only must read "slope steepness proxy", not landslide risk |
+| Wildfire | A | FC `npv` peak + live fuel moisture (NDMI) + slope/aspect + seasonality; add ignition/road proximity |
+| Drought | A | CHIRPS SPI-3/6/12 + NDVI anomaly — replaces the single static rainfall mean |
+| Liquefaction, karst/sinkhole | A (low confidence) | flat alluvial + moisture proxy; circular depression detection; both are screens |
+| Seismic proximity | B | USGS/PGF catalog; not on DEA |
+| **Constraint / legal risk** | **B, new** | WDPA protected areas, forest reserves, wetland buffers, EMA-listed EIA triggers. Its absence is a product gap for someone buying land, not merely a data gap. |
+
+### Infrastructure, property, energy, urban (Cat 6-8, 10)
+| Capability | Status | Basis |
+|:--|:--|:--|
+| Cut-and-fill volumes, platform earthworks | A | DEM + polygon; genuinely computable and billable |
+| Least-cost access route + gradient profile | A+B | DEM cost surface; road network from OSM |
+| Line-of-sight / viewshed | A | DEM viewshed, add 10 m sensor height |
+| Solar insolation & shading | A+B | DEM aspect + NASA POWER/GEE for GHI — imagery cannot measure irradiance |
+| Wind exposure | A | ridgeline/TPI proxies only; a resource claim needs met mast or reanalysis |
+| Mini-hydro head × catchment | A | `catchment_for` + gradient + runoff coefficient |
+| Built-up & settlement growth | A | `wsf_2015/2019/evolution` at 10 m + WorldCover — replaces v1's VIIRS assumption with data that exists |
+| Urban heat island / LST anomaly | A | `ls8_st`/`ls9_st` with `st_qa` filtering |
+| Service-access gaps | B | clinics/schools/water points from OSM or national registries |
+| Land valuation | B/C | needs transaction data; a hedonic model from satellite proxies alone will be confidently wrong |
+
+### Conservation (Cat 9)
+Habitat suitability, corridor connectivity, wetland change and HWC frontiers become **A/B** with `io_lulc_v2` + WOfS + DEM + WDPA. Poaching-pressure proxies stay B (needs patrol/incident data). None of it substitutes for a species survey.
+
+---
+
+## 7. Runtime architecture
 
 ```
-                    User Input (GPS + AOI radius)
-                              │
-                              ▼
-                 ┌────────────────────────┐
-                 │   Data Acquisition     │
-                 │   Engine               │
-                 │   (DE Africa WCS +     │
-                 │    NASA POWER +        │
-                 │    USGS / OSM)         │
-                 └───────────┬────────────┘
-                             │
-              Unified 30m UTM Grid (GeoTIFF stack)
-                             │
-          ┌──────────────────┼──────────────────┐
-          ▼                  ▼                  ▼
-   ┌────────────┐    ┌────────────┐    ┌────────────┐
-   │  Category  │    │  Category  │    │  Category  │
-   │  Engines   │    │  Engines   │    │  Engines   │
-   │  (1–5)     │    │  (6–8)     │    │  (9–10)    │
-   │            │    │            │    │            │
-   │ Water      │    │ Infra      │    │ Wildlife   │
-   │ Minerals   │    │ Property   │    │ Urban      │
-   │ Soil       │    │ Energy     │    │            │
-   │ Vegetation │    │            │    │            │
-   │ Hazard     │    │            │    │            │
-   └─────┬──────┘    └─────┬──────┘    └─────┬──────┘
-         │                 │                 │
-         └─────────────────┼─────────────────┘
-                           │
-                           ▼
-              ┌────────────────────────┐
-              │   Report Compositor    │
-              │   & Export Engine      │
-              │                        │
-              │   • GeoTIFF rasters    │
-              │   • GeoJSON vectors    │
-              │   • PNG cartography    │
-              │   • KMZ mobile maps    │
-              │   • PDF client reports │
-              │   • JSON metadata      │
-              └────────────────────────┘
+Agent ──MCP (stdio | streamable HTTP)──► API process  (thin: validate, enqueue, return job_id)
+                                              │
+                                              ▼
+                                    Job store (sqlite/postgres)
+                                              │
+                                              ▼
+                          Worker pool (CPU-bound raster processes)
+                                              │
+              ┌───────────────────────────────┼───────────────────────┐
+              ▼                               ▼                       ▼
+   Cache (content-addressed,        Per-job workspace          Validation ledger
+   keyed on layer+version+geom)     /jobs/{id}/  ← isolated     outcomes + calibration
+              │                               │
+              ▼                               ▼
+        DE Africa WCS                  Artifact store (signed URLs, size-capped)
+                                            │
+                                            ▼
+                                     Web preview (Leaflet / OGC features)
 ```
 
----
+Required properties:
 
-## Implementation Priority
-
-| Phase | Categories | Rationale |
-|:------|:-----------|:----------|
-| **Phase 1** | 🔵 Water + 🟡 Minerals | Core revenue generators; highest client demand in Zimbabwe |
-| **Phase 2** | 🟤 Soil/Land + 🔴 Hazard/Risk | Expands to agriculture and insurance/banking markets |
-| **Phase 3** | 🟠 Energy + ⚪ Infrastructure | Renewable energy and construction due diligence |
-| **Phase 4** | 🟢 Vegetation + 🟣 Property | Carbon credits, rangeland, diaspora land buyers |
-| **Phase 5** | 🔵 Wildlife + ⚫ Urban | Conservation NGOs and municipal planning contracts |
-
----
-
-## Key Technical Notes
-
-> [!IMPORTANT]
-> All capabilities are **screening-level tools** derived from satellite imagery and other remotely sensed datasets at resolutions ranging from 10 m to approximately 5 km. They do not replace field verification (geophysical surveys, soil sampling, drilling, laboratory assays, or professional engineering assessments). All reports must carry appropriate disclaimers and confidence indicators.
-
-> [!NOTE]
-> The platform uses **expert-weighted multi-criteria decision analysis (AHP)** by default. AHP weights must be versioned and sensitivity-tested. When sufficient, representative ground-truth data becomes available (e.g., borehole yield records, assay results), the system can transition to supervised machine learning (Random Forest, XGBoost) for calibrated predictions, with held-out validation and uncertainty estimates.
+- **No mutable global configuration.** Replace `set_target_site()` module globals ([src/config.py:125-204](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/config.py#L125-L204)) with an immutable `SiteContext` passed explicitly. This is what removes cross-request overwrite and makes `--workers 2` survivable.
+- **Per-job output isolation** — fixes [src/config.py:31](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/config.py#L31) with [src/api.py:145](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/api.py#L145).
+- **Windowed raster IO** — no whole-array reads ([src/utils/raster.py:31-36](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/utils/raster.py#L31-L36)); read only the requested bbox at the requested resolution; replace the pure-Python D8 heap loop with `pyflwdir`/`richdem` so a 20 km AOI takes seconds, not minutes.
+- **Explicit nodata propagation** — every helper states its NaN contract; a NaN never enters a score, class, or statistic without being counted and reported in `data_quality`.
+- **Band resolution by name** — one cached `DescribeCoverage` per layer.
+- **Reprojection policy** — nearest for classifications, bilinear/cubic for continuous, and **not** bilinear for a DEM feeding slope/TWI where it smooths the signal; the current default is bilinear ([src/utils/raster.py:16](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/utils/raster.py#L16)).
+- **Geometry validation** — reject out-of-coverage, self-intersecting or absurd-area inputs before compute; cap AOI area and cell count with a returned error rather than a hang.
+- **Cost & latency budget per tool**, enforced server-side and surfaced in `check_coverage` so the agent chooses knowingly.
 
 ---
 
-*SiteSurveyor AI — Eineva Labs — Satellite Intelligence for Ground Decisions*
+## 8. Scientific-integrity requirements
+
+The product's risk is not that the math is wrong — it's that the language outruns it. These are spec, not style.
+
+1. **Three-tier claim labels** on every capability: *observed* (sensor-measured), *derived* (computed from observed), *inferred* (indicative of something unmeasured). Canopy-index "soil capability" is tier 3 and must read that way.
+2. **Nodata is never evidence.** No `nan_to_num(..., 0.0)` in a scoring path ([src/engines/hazard.py:82](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/engines/hazard.py#L82)); masked pixels are excluded and counted. Fix the digitize-NaN path first — missing data currently classifies as "Very High".
+3. **Relative scores are labelled relative**; cross-site comparison requires a fixed absolute normalisation with documented reference statistics.
+4. **Weights are versioned artefacts** with a stated derivation, a consistency check if AHP is claimed, and a sensitivity report on every composite. The same index cannot be +0.08 water, +0.18 soil and +0.15 hazard-fuel without saying so.
+5. **Validation is a feature.** Before any accuracy marketing: assemble known outcomes (borehole yields, mapped deposits, sampled soils), hold out geographically separate sites, report hit-rate and precision/recall per class, re-run on every weight change. `record_outcome` + the ledger make this compound.
+6. **Reproducibility**: params hash and data versions in every response; no global RNG reseeding; same inputs ⇒ same outputs.
+7. **Method honesty**: no model name (AHP, RUSLE, USLE, SPI, Crosta PCA, SDG 15.3.1) unless the published method is implemented end-to-end.
+
+---
+
+## 9. Security & operations
+
+- **Authn/authz on every data path**, including `/api/dossier`, `/api/report` and `/outputs/*` — today these serve the last client's report, including name and street address, to anyone. Per-tenant job ownership; signed, expiring artifact URLs.
+- **CORS**: replace wildcard-with-credentials ([src/api.py:76-82](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/api.py#L76-L82)) with an explicit allow-list; re-enable DNS-rebinding protection or demonstrate it's unnecessary at the proxy.
+- **Secrets**: testing against a live key is your call. Two facts worth holding — the value stays readable in git history after the file is cleaned, so revocation rather than removal is the fix; and if that PAT is reused by other pipelines, revoking it breaks them too. Placeholder in repo, secret in Render env, is the shape to return to when testing ends.
+- **Error hygiene**: typed codes to clients, tracebacks logged server-side against `job_id`.
+- **Quota & abuse**: per-key rate limits, per-request compute ceilings, and respect for the fact that the upstream WCS is a shared research service.
+- **Observability**: structured logs keyed by job, per-stage timing, upstream WCS failure rate, cache hit rate, per-tool token footprint.
+- **Agent evaluation harness**: scripted scenarios scored for tool-selection accuracy, refusal of out-of-coverage requests, and whether the model reproduces the claim ceiling. Without this, "the agent will use it well" is a guess.
+- **Data licences**: DE Africa products carry attribution terms, and ESA WorldCover/WorldCereal, USGS, OSM (ODbL), WDPA and SoilGrids each differ. Ship an attribution block per report.
+
+---
+
+## 10. Roadmap with acceptance criteria
+
+**Phase 0 — make it safe to run at all** *(no new capability)*
+Fix and prove: NaN→"Very High" classification; `nan_to_num` no-data-as-zero-evidence in hazard/lineaments; sink-fill ε + DEM buffering + consistent filled/unfilled TWI; per-job workspace and immutable `SiteContext`; auth on artifact paths; band resolution by name; a `pytest` suite with golden rasters for terrain/spectral/classification, plus a concurrency test that runs two AOIs in parallel and asserts neither result is contaminated.
+
+*Status — scoring integrity landed (42 passing, 2 xfail-red-line tests in `tests/`)*:
+- No-data is no longer evidence: class 255 for unobserved cells, NaN carried through `robust_norm`/`fmax`/weighted sums, `null` instead of bare `NaN` in JSON, gray voids with a legend entry on every map.
+- Terrain/hydrology: ε-flood removes false pits on plateaus, void-rim seeding stops valid ground behind a hole being drained, accumulation is NaN inside voids, negative TWI retained, and the `np.gradient` stencil now voids cells touching a hole (a lone DEM void used to read as "flat, infiltrative").
+- SAR structure: edges suppressed along void boundaries, lineament/intersection/drainage densities divided by *observed* area and NaN below 34% coverage.
+- Determinism: `residual_index` samples evenly through NDVI order instead of drawing a fresh random subsample per run; Hough seeded.
+- Provenance honesty: "layer integrated" is now derived from successful use (plus the error string), not from a file existing; the dossier reports `not_run` vs `unreadable (...)`; a survey with no candidates no longer crashes the HTML report.
+- Spectral: void scenes produce NaN without 0/0 warnings flooding the log; an under-populated detrend returns no-data rather than passing the raw ratio through mislabelled as a residual.
+
+*Still open in Phase 0*: immutable per-job `SiteContext` + namespaced output directory (`tests/test_site_isolation.py` documents the two collisions as strict xfail), band resolution by name, artifact-path auth, golden-raster fixtures, and the terrain cost below.
+**Performance item**: `fill_sinks` 6.74 s + `d8_flow` 3.35 s on an 856×901 grid — ~10 s per DEM pass, and `water.py` was routing flow twice before the fix. A worker pool sizing and any `terrain` tool latency budget must use this, not a per-pixel estimate.
+**Done when**: regression and concurrency tests pass, and no `except: pass` remains in a scoring path.
+
+**Phase 1 — MCP surface v2 (discovery + primitives + async)**
+T0 + T1, `terrain`/`spectral`/`classification` as separate async tools, `score`/`rank_sites` with constraints and sensitivity, response envelope, `get_job`. stdio + Streamable HTTP.
+**Done when**: an agent given only the tool list independently produces a correct water-screening answer for a new coordinate, refuses an out-of-coverage point, and the exchange fits a defined token budget.
+
+**Phase 2 — time series + data that already exists but is unused**
+`timeseries`, LST/evaporative stress, `wq_annual`, `io_lulc_v2`, `wsf_evolution`, `srtm_deriv`, `ndvi_anomaly`/`ndvi_climatology`, full CHIRPS SPI, FC percentiles with validity counts. Polygon input.
+**Done when**: drought, vegetation-trend and water-quality answers come from real multi-date evidence with dates in the provenance block.
+
+**Phase 3 — external context, legal & physical due diligence**
+SoilGrids, geology/faults, MRDS, OSM access distances, WDPA/reserve/wetland constraints, tenure/EIA screening, each stamped "third-party, licence, staleness".
+**Done when**: constraint layers *exclude* rather than penalise, and every report lists the legal/administrative checks that could not be performed.
+
+**Phase 4 — validation & calibration**
+Ledger populated from client outcomes; held-out tests; per-class precision/recall; weights re-derived or replaced by a supervised model where data supports it; published accuracy with confidence intervals.
+**Done when**: at least one category states a measured hit-rate against its pre-validation heuristic.
+
+**Phase 5 — remaining categories & delivery**
+Energy (NASA POWER/GEE), infrastructure (cut-and-fill, least-cost access, viewshed), conservation and urban categories, report polish, vector tiles or web preview for humans.
+
+Rule inherited from v1 and kept: **no new category reaches the public surface until the preceding phase has measurable validation.**
+
+---
+
+## 11. Descoped, with reasons
+
+| v1 item | Decision |
+|:--|:--|
+| ASTER TIR silica/quartz (2.6) and thermal mineralogy (2.8) | Drop — not hosted; needs a different provider |
+| MODIS / VIIRS nightlights (7.4, 8.4, 10.6) | Replace with WorldCover + WSF + `io_lulc_v2` |
+| True ATI needing day+night thermal (1.12) | Replace with LST anomaly + evaporative fraction from `ls*_st` |
+| "Precision" borehole siting, grade/tonnage, valuation figures | Re-label as prioritisation; no numeric claim without validation |
+| AHP as the stated method | Re-label as weighted linear combination until properly constructed |
+| Supervised ML across categories | Behind Phase 4 — the training labels don't exist yet |
+| Cropland download wired but unused ([src/fetch_data.py:185-188](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/fetch_data.py#L185-L188)) | Resolved — `crop_mask` band 2 (`prob`) now feeds Cat 3 capability at [src/engines/soil.py:214](file:///C:/Users/BizIntel/Documents/sitesurveyorai/src/engines/soil.py#L214), with `fmax` so a missing cropland or FC layer does not void the other |
+
+---
+
+## 12. Decisions and remaining questions
+
+**Decided (2026-11-05):**
+
+1. **Primary consumer** — your own app plus your own agents. Consequence: one shared bearer key, *not* public multi-tenant auth. Phase 0 auth work is hours: reject unauthenticated calls, stop serving `/outputs/*` by guessed filename, and keep the key out of the repo. Multi-tenant keys, quotas and per-tenant billing are descoped until there is an external consumer.
+2. **Isolation model** — own VPS, one API process plus a worker pool. Consequence: the worker pool is the unit of concurrency, so the module-global `src.config` in §10 must become an immutable per-job `SiteContext` *before* a second worker exists; today two workers would corrupt each other's AOI mid-survey.
+3. **Geometry** — point + radius now, polygon in Phase 2. Consequence: `check_coverage` and every analysis tool take `{lat, lon, radius_m}`; the `geometry` argument stays in the tool signature so Phase 2 adds a variant rather than a breaking change.
+4. **Validation data** — none obtainable yet. Consequence: build the `record_outcome` ledger now so evidence starts accumulating against a defined schema, and keep every claim ceiling in §8 (no hit-rates, no "precision" siting) until Phase 4 has something to measure.
+
+**Still open:**
+
+5. **Licence** — README claims Proprietary ([README.md:139](file:///C:/Users/BizIntel/Documents/sitesurveyorai/README.md#L139)) while MIT is committed at root. Settle before publishing an endpoint others integrate with.
+6. **DE Africa credential** — the key currently in the repo is a temporary test key you will revoke after testing. Two facts to keep in view: revocation is the fix, not editing the file, because the value stays readable in git history; and a shared PAT would break other pipelines, so the replacement goes in the VPS environment, not the repo.
+
+---
+
+*SiteSurveyor AI — Eineva Labs — screening evidence for ground decisions*

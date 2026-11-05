@@ -41,7 +41,16 @@ from matplotlib.patches import Patch
 import numpy as np
 from rasterio.warp import Resampling
 
-from src.utils.classification import classify_zones, find_candidate_sites, jenks_breaks
+from src.utils.classification import (
+    NODATA_CLASS,
+    NODATA_HEX,
+    classify_zones,
+    finite_mean,
+    find_candidate_sites,
+    jenks_breaks,
+    safe_round,
+    zone_class,
+)
 from src.utils.export import export_candidates_kml, export_kmz
 from src.utils.raster import pixel_to_lonlat, robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import bare_soil_index, ndmi, ndvi
@@ -79,7 +88,6 @@ def run_hazard_survey(
 
     # WOfS: Band 3 is water inundation frequency (0.0 to 1.0)
     wofs_freq = warp(cfg.RAW / "wofs.tif", 3)
-    wofs_freq = np.nan_to_num(wofs_freq, nan=0.0)
 
     # Sentinel-2 GeoMAD
     red = warp(cfg.RAW / "geomad.tif", 3, scale=10000.0)
@@ -87,17 +95,22 @@ def run_hazard_survey(
     swir1 = warp(cfg.RAW / "geomad.tif", 9, scale=10000.0)
     swir2 = warp(cfg.RAW / "geomad.tif", 10, scale=10000.0)
 
-    # Check for DE Africa Sandbox Fractional Cover (Band 5: NPV median, Band 6: NPV peak, Band 8: BS median)
+    # DE Africa Fractional Cover: band 6 = npv_pc_90, band 8 = bs_pc_50
+    # (verified order: pv 10/50/90, npv 10/50/90, bs 10/50/90, count_valid)
     fc_path = cfg.RAW / "fc_ls_2023.tif"
     fc_npv_peak = None
     fc_bs = None
+    fc_error = None
     if fc_path.exists():
         try:
             fc_npv_peak = warp(fc_path, 6) / 100.0  # npv_pc_90 (peak dry biomass)
-            fc_bs = warp(fc_path, 8) / 100.0        # bs_pc_50 (median bare soil)
-            print("  [DE Africa Sandbox] Integrated Fractional Cover (NPV Wildfire Fuel & BS Soil Washout)")
+            fc_bs = warp(fc_path, 8) / 100.0  # bs_pc_50 (median bare soil)
+            print("      Integrated DE Africa Fractional Cover (NPV peak fuel, BS median)")
         except Exception as e:
-            print(f"  [warn] Could not warp fc_ls: {e}")
+            fc_npv_peak = None
+            fc_bs = None
+            fc_error = f"{type(e).__name__}: {e}"
+            print(f"      [warn] Fractional Cover could not be warped, substituting BSI proxy: {e}")
 
     # ------------------------------------------------------------------
     # 2. Terrain & hydrological modeling
@@ -105,7 +118,7 @@ def run_hazard_survey(
     print("[2/6] Modeling terrain slope, flow routing, and ponding...")
     slope = slope_degrees(dem)
     filled = fill_sinks(dem)
-    twi_layer = twi(filled, slope)
+    twi_layer = twi(filled, slope_degrees(filled))
 
     # ------------------------------------------------------------------
     # 3. Spectral indices
@@ -123,7 +136,10 @@ def run_hazard_survey(
     # Layer 1: Flood & Inundation Hazard
     # Direct historical water frequency + topographic ponding in flat terrain (slope < 2 deg and high TWI)
     twi_norm = robust_norm(twi_layer)
-    flat_depression = (slope < 2.5) * twi_norm
+    # A NaN slope compared as "not flat" would score data-void terrain as safe,
+    # so the flag is kept NaN wherever the terrain is unobserved.
+    flat_flag = np.where(np.isfinite(slope), (slope < 2.5).astype("float32"), np.nan)
+    flat_depression = flat_flag * twi_norm
     flood_hazard = np.clip(wofs_freq * 3.0 + flat_depression * 0.7, 0.0, 1.0)
 
     # Layer 2: Slope Failure / Landslide Risk
@@ -196,10 +212,11 @@ def run_hazard_survey(
         max(0, cfg.TARGET_ROW - 5): cfg.TARGET_ROW + 6,
         max(0, cfg.TARGET_COL - 5): cfg.TARGET_COL + 6
     ]
-    local_mean_hazard = float(np.nanmean(local_win))
-    local_hazard_class = int(np.digitize(local_mean_hazard, breaks) + 1)
+    local_mean_hazard = finite_mean(local_win)
+    local_hazard_class = zone_class(local_mean_hazard, breaks)
 
     hazard_class_names = {
+        NODATA_CLASS: "No data (no satellite coverage)",
         0: "Water Body",
         1: "Very Low Hazard (Safe)",
         2: "Low Hazard (Minor Risk)",
@@ -285,25 +302,27 @@ def run_hazard_survey(
         "analyst": cfg.ANALYST,
         "target_coordinates": {"latitude": cfg.TARGET_LAT, "longitude": cfg.TARGET_LON},
         "target_assessment": {
-            "hazard_index_score": round(t_hazard, 1),
+            "hazard_index_score": safe_round(t_hazard, 1),
             "hazard_classification": hazard_class_names.get(t_class, "Unknown"),
-            "safety_index_score": round(t_safety, 1),
-            "local_150m_mean_hazard": round(local_mean_hazard, 1),
+            "safety_index_score": safe_round(t_safety, 1),
+            "local_150m_mean_hazard": safe_round(local_mean_hazard, 1),
             "local_150m_hazard_class": hazard_class_names.get(local_hazard_class, "Unknown"),
             "sub_hazard_breakdown": {
-                "flood_inundation_risk": round(float(flood_hazard[cfg.TARGET_ROW, cfg.TARGET_COL]) * 100, 1),
-                "slope_failure_risk": round(float(slope_hazard[cfg.TARGET_ROW, cfg.TARGET_COL]) * 100, 1),
-                "erosion_washout_risk": round(float(erosion_hazard[cfg.TARGET_ROW, cfg.TARGET_COL]) * 100, 1),
-                "wildfire_fuel_risk": round(float(fire_hazard[cfg.TARGET_ROW, cfg.TARGET_COL]) * 100, 1),
-                "drought_vulnerability": round(float(drought_hazard[cfg.TARGET_ROW, cfg.TARGET_COL]) * 100, 1),
+                "flood_inundation_risk": safe_round(flood_hazard[cfg.TARGET_ROW, cfg.TARGET_COL] * 100, 1),
+                "slope_failure_risk": safe_round(slope_hazard[cfg.TARGET_ROW, cfg.TARGET_COL] * 100, 1),
+                "erosion_washout_risk": safe_round(erosion_hazard[cfg.TARGET_ROW, cfg.TARGET_COL] * 100, 1),
+                "wildfire_fuel_risk": safe_round(fire_hazard[cfg.TARGET_ROW, cfg.TARGET_COL] * 100, 1),
+                "drought_vulnerability": safe_round(drought_hazard[cfg.TARGET_ROW, cfg.TARGET_COL] * 100, 1),
             },
         },
         "model_weights": cfg.HAZARD_WEIGHTS,
         "jenks_breaks": [round(float(b), 2) for b in breaks],
         "deafrica_sandbox": {
-            "fractional_cover_integrated": fc_path.exists(),
-            "target_peak_dry_fuel_pct": round(float(fc_npv_peak[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0), 1) if fc_npv_peak is not None else None,
-            "target_bare_soil_pct": round(float(fc_bs[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0), 1) if fc_bs is not None else None,
+            "fractional_cover_integrated": fc_bs is not None and fc_npv_peak is not None,
+            "fractional_cover_file_present": fc_path.exists(),
+            "fractional_cover_error": fc_error,
+            "target_peak_dry_fuel_pct": safe_round(fc_npv_peak[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0, 1) if fc_npv_peak is not None else None,
+            "target_bare_soil_pct": safe_round(fc_bs[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0, 1) if fc_bs is not None else None,
         },
         "safest_candidate_sites": safest_sites,
     }
@@ -324,7 +343,8 @@ def _plot_hazard_map(hazard_index, hazard_zones, safest_sites):
     cmap = ListedColormap(hazard_colors)
 
     fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(hazard_zones, cmap=cmap, vmin=0, vmax=6, interpolation="none")
+    cmap.set_bad(color=NODATA_HEX)
+    ax.imshow(np.ma.masked_equal(hazard_zones, NODATA_CLASS), cmap=cmap, vmin=0, vmax=6, interpolation="none")
 
     # Transparent continuous hazard overlay
     ax.imshow(hazard_index / 100.0, cmap="YlOrRd", alpha=0.35, vmin=0, vmax=1)
@@ -353,6 +373,8 @@ def _plot_hazard_map(hazard_index, hazard_zones, safest_sites):
         Patch(color=hazard_colors[4], label="High Hazard"),
         Patch(color=hazard_colors[5], label="Very High Hazard"),
     ]
+    if (hazard_zones == NODATA_CLASS).any():
+        patches.append(Patch(color=NODATA_HEX, label="No satellite coverage"))
     ax.legend(handles=patches, loc="lower right", fontsize=8,
               framealpha=0.9, title="Environmental Risk Level")
 
@@ -440,7 +462,8 @@ def _plot_hazard_zoom(hazard_index, hazard_zones, safest_sites):
     cmap = ListedColormap(hazard_colors)
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.imshow(hz_z, cmap=cmap, vmin=0, vmax=6, interpolation="none")
+    cmap.set_bad(color=NODATA_HEX)
+    ax.imshow(np.ma.masked_equal(hz_z, NODATA_CLASS), cmap=cmap, vmin=0, vmax=6, interpolation="none")
     ax.imshow(hi_z / 100.0, cmap="YlOrRd", alpha=0.35, vmin=0, vmax=1)
 
     # Client Property

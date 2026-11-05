@@ -41,7 +41,17 @@ from matplotlib.patches import Patch
 import numpy as np
 from rasterio.warp import Resampling
 
-from src.utils.classification import classify_zones, find_candidate_sites, jenks_breaks
+from src.utils.classification import (
+    CLASS_NAMES,
+    NODATA_CLASS,
+    NODATA_HEX,
+    classify_zones,
+    finite_mean,
+    find_candidate_sites,
+    jenks_breaks,
+    safe_round,
+    zone_class,
+)
 from src.utils.export import export_candidates_kml, export_kmz
 from src.utils.raster import pixel_to_lonlat, robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import bare_soil_index, ndmi, ndvi
@@ -78,7 +88,9 @@ _LC_SUITABILITY = {
 
 def _lc_suitability_raster(lc: np.ndarray) -> np.ndarray:
     """Map WorldCover class integers to 0–1 land-capability suitability scores."""
-    out = np.zeros(lc.shape, dtype="float32")
+    # Unobserved land cover stays NaN: zero would be read as "scored and
+    # unusable", which is the opposite of "not measured".
+    out = np.full(lc.shape, np.nan, dtype="float32")
     for cls_val, score in _LC_SUITABILITY.items():
         out[lc == cls_val] = score
     return out
@@ -125,24 +137,32 @@ def run_soil_survey(
     fc_path = cfg.RAW / "fc_ls_2023.tif"
     crop_path = cfg.RAW / "crop_mask.tif"
 
+    # DE Africa Fractional Cover band order (verified via DescribeCoverage):
+    #   pv 10/50/90 = 1/2/3, npv 10/50/90 = 4/5/6, bs 10/50/90 = 7/8/9, count_valid = 10
     fc_bs = None
     fc_pv = None
+    fc_error = None
     if fc_path.exists():
         try:
-            # Band 8 is median bare soil (0-100), Band 2 is median photosynthetic veg (0-100)
-            fc_bs = warp(fc_path, 8) / 100.0
-            fc_pv = warp(fc_path, 2) / 100.0
+            fc_bs = warp(fc_path, 8) / 100.0   # bs_pc_50  (median bare soil, %)
+            fc_pv = warp(fc_path, 2) / 100.0   # pv_pc_50  (median photosynthetic veg, %)
             print("  [DE Africa Sandbox] Integrated Fractional Cover (BS/PV)")
         except Exception as e:
+            fc_bs = None
+            fc_pv = None
+            fc_error = f"{type(e).__name__}: {e}"
             print(f"  [warn] Could not warp fc_ls: {e}")
 
+    # crop_mask bands: mask = 1, prob = 2, filtered = 3
     crop_prob = None
+    crop_error = None
     if crop_path.exists():
         try:
-            # Band 2 is cropland probability (0-100)
-            crop_prob = warp(crop_path, 2) / 100.0
+            crop_prob = warp(crop_path, 2) / 100.0   # probability of cropland, 0-100 %
             print("  [DE Africa Sandbox] Integrated Continental Cropland Extent")
         except Exception as e:
+            crop_prob = None
+            crop_error = f"{type(e).__name__}: {e}"
             print(f"  [warn] Could not warp crop_mask: {e}")
 
     # ------------------------------------------------------------------
@@ -151,7 +171,7 @@ def run_soil_survey(
     print("[2/6] Computing terrain derivatives and flow routing...")
     slope    = slope_degrees(dem)
     filled   = fill_sinks(dem)
-    twi_layer = twi(filled, slope)
+    twi_layer = twi(filled, slope_degrees(filled))
 
     # ------------------------------------------------------------------
     # 3. Spectral indices
@@ -190,7 +210,8 @@ def run_soil_survey(
     lc_suit = _lc_suitability_raster(lc)                 # already 0–1
     if crop_prob is not None:
         active_crop_boost = np.clip(crop_prob, 0.0, 1.0)
-        lc_suit = np.maximum(lc_suit, active_crop_boost * 0.95)
+        # fmax, not maximum: one unknown layer should not void the other.
+        lc_suit = np.fmax(lc_suit, active_crop_boost * 0.95)
 
     # 4e. Topographic wetness (TWI): moderate TWI = best (not too wet, not too dry)
     #     Use a bell-curve: score peaks at ~65th percentile TWI, drops at extremes
@@ -237,11 +258,10 @@ def run_soil_survey(
         max(0, cfg.TARGET_ROW - 5): cfg.TARGET_ROW + 6,
         max(0, cfg.TARGET_COL - 5): cfg.TARGET_COL + 6
     ]
-    local_mean = float(np.nanmean(local_win))
-    local_class = int(np.digitize(local_mean, breaks) + 1)
+    local_mean = finite_mean(local_win)
+    local_class = zone_class(local_mean, breaks)
 
-    class_names = {0: "Water", 1: "Very low", 2: "Low",
-                   3: "Moderate", 4: "High", 5: "Very high", 6: "Built-up"}
+    class_names = CLASS_NAMES
 
     print(f"  Target SCI (cell)       : {t_score:.1f}/100  [{class_names.get(t_class, '?')}]")
     print(f"  Target SCI (150m mean)  : {local_mean:.1f}/100  [{class_names.get(local_class, '?')}]")
@@ -318,19 +338,23 @@ def run_soil_survey(
         "analyst": cfg.ANALYST,
         "target_lat": cfg.TARGET_LAT,
         "target_lon": cfg.TARGET_LON,
-        "target_sci_score": round(t_score, 1),
+        "target_sci_score": safe_round(t_score, 1),
         "target_sci_class": class_names.get(t_class, "?"),
-        "local_150m_mean_score": round(local_mean, 1),
+        "local_150m_mean_score": safe_round(local_mean, 1),
         "local_150m_class": class_names.get(local_class, "?"),
         "candidate_areas": candidates,
         "weights_used": SOIL_WEIGHTS,
         "jenks_breaks": [round(float(b), 2) for b in breaks],
         "deafrica_sandbox": {
-            "fractional_cover_integrated": fc_path.exists(),
-            "cropland_mask_integrated": crop_path.exists(),
-            "target_bare_soil_pct": round(float(fc_bs[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0), 1) if fc_bs is not None else None,
-            "target_green_veg_pct": round(float(fc_pv[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0), 1) if fc_pv is not None else None,
-            "target_cropland_prob_pct": round(float(crop_prob[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0), 1) if crop_prob is not None else None,
+            "fractional_cover_integrated": fc_bs is not None and fc_pv is not None,
+            "cropland_mask_integrated": crop_prob is not None,
+            "fractional_cover_file_present": fc_path.exists(),
+            "cropland_mask_file_present": crop_path.exists(),
+            "fractional_cover_error": fc_error,
+            "cropland_mask_error": crop_error,
+            "target_bare_soil_pct": safe_round(fc_bs[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0, 1) if fc_bs is not None else None,
+            "target_green_veg_pct": safe_round(fc_pv[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0, 1) if fc_pv is not None else None,
+            "target_cropland_prob_pct": safe_round(crop_prob[cfg.TARGET_ROW, cfg.TARGET_COL] * 100.0, 1) if crop_prob is not None else None,
         },
         "aoi_grid_px": f"{cfg.WIDTH}×{cfg.HEIGHT}",
         "cell_size_m": cfg.CELL,
@@ -355,7 +379,8 @@ def _plot_soil_map(sci, zones, candidates):
     cmap = ListedColormap(zone_colors)
 
     fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(zones, cmap=cmap, vmin=0, vmax=6, interpolation="none")
+    cmap.set_bad(color=NODATA_HEX)
+    ax.imshow(np.ma.masked_equal(zones, NODATA_CLASS), cmap=cmap, vmin=0, vmax=6, interpolation="none")
 
     # Overlay SCI as semi-transparent gradient
     masked_sci = np.ma.masked_where(zones == 0, sci / 100.0)
@@ -387,6 +412,8 @@ def _plot_soil_map(sci, zones, candidates):
         Patch(color=zone_colors[5], label="Very High"),
         Patch(color=zone_colors[6], label="Built-up"),
     ]
+    if (zones == NODATA_CLASS).any():
+        patches.append(Patch(color=NODATA_HEX, label="No satellite coverage"))
     ax.legend(handles=patches, loc="lower right", fontsize=8,
               framealpha=0.85, title="Land Capability")
 
@@ -454,7 +481,8 @@ def _plot_zone_zoom(sci, zones, candidates):
     cmap = ListedColormap(zone_colors)
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.imshow(zones_z, cmap=cmap, vmin=0, vmax=6, interpolation="none")
+    cmap.set_bad(color=NODATA_HEX)
+    ax.imshow(np.ma.masked_equal(zones_z, NODATA_CLASS), cmap=cmap, vmin=0, vmax=6, interpolation="none")
 
     masked_sci = np.ma.masked_where(zones_z == 0, sci_z / 100.0)
     ax.imshow(masked_sci, cmap="Greens", alpha=0.4, vmin=0, vmax=1)

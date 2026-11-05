@@ -35,11 +35,31 @@ from matplotlib.patches import Patch
 import numpy as np
 from rasterio.warp import Resampling
 
-from src.utils.classification import classify_zones, find_candidate_sites, jenks_breaks
-from src.utils.lineaments import detect_lineaments, extract_edges, lineament_density
+from src.utils.classification import (
+    CLASS_NAMES,
+    NODATA_CLASS,
+    NODATA_RGB,
+    classify_zones,
+    finite_mean,
+    find_candidate_sites,
+    jenks_breaks,
+    paint_zones,
+    safe_round,
+    zone_class,
+)
+from src.utils.lineaments import (
+    detect_lineaments, effective_min_length_m, extract_edges, lineament_density,
+)
 from src.utils.raster import pixel_to_lonlat, robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import ndvi
-from src.utils.terrain import drainage_density, fill_sinks, slope_degrees, terrain_hillshade, twi
+from src.utils.terrain import (
+    d8_flow,
+    drainage_density,
+    fill_sinks,
+    slope_degrees,
+    terrain_hillshade,
+    twi,
+)
 
 
 def run_water_survey(
@@ -77,19 +97,20 @@ def run_water_survey(
     slope = slope_degrees(dem)
     hs = terrain_hillshade(dem)
     filled = fill_sinks(dem)
-    twi_layer = twi(filled, slope)
-
-    # Extract streams from filled flow accumulation for drainage density
-    from src.utils.terrain import d8_flow
+    flow_slope = slope_degrees(filled)
     _, flow_acc = d8_flow(filled)
-    drain_dens = drainage_density(flow_acc, threshold=500, kernel_radius=17)
+    twi_layer = twi(filled, flow_slope, flow_acc=flow_acc)
+    drain_dens = drainage_density(flow_acc, threshold=500, kernel_radius=17,
+                                 valid_mask=np.isfinite(filled))
 
     # 3. Structural fracture extraction
     print("[3/6] Detecting structural lineaments (SAR + DEM hillshade)...")
     edges = extract_edges(alos_hv, hs)
     segments = detect_lineaments(edges, threshold=25, min_length_px=30, line_gap_px=5, min_length_meters=600.0)
-    lin_dens = lineament_density(segments, kernel_radius_px=17)
-    print(f"      Extracted {len(segments)} valid regional lineament segments (>=600m)")
+    lin_dens = lineament_density(segments, kernel_radius_px=17,
+                                 valid_mask=np.isfinite(alos_hv) & np.isfinite(hs))
+    print(f"      Extracted {len(segments)} valid regional lineament segments "
+          f"(>= {effective_min_length_m(30, 600.0):.0f} m at {cfg.CELL:.0f} m cells)")
 
     # 4. Infiltration, NDVI & rainfall
     print("[4/6] Processing land cover infiltration, NDVI, and rainfall...")
@@ -100,10 +121,15 @@ def run_water_survey(
         40: 0.5,  # Cropland
         50: 0.1,  # Built-up
         60: 0.3,  # Bare
+        70: 0.1,  # Snow and ice
         80: 0.0,  # Water
         90: 0.9,  # Wetland
+        95: 0.9,  # Mangrove
+        100: 0.8,  # Moss / lichen
     }
-    infil = np.zeros_like(lc, dtype="float32")
+    # Unobserved land cover stays NaN: asserting "impervious" from missing data
+    # would invert the meaning of a no-data pixel into the lowest infiltration score.
+    infil = np.full_like(lc, np.nan, dtype="float32")
     for k, v in infil_map.items():
         infil[lc == k] = v
 
@@ -148,14 +174,13 @@ def run_water_survey(
     tr, tc = cfg.TARGET_ROW, cfg.TARGET_COL
     t_score = float(gwpz_index[tr, tc])
     t_class = int(classes[tr, tc])
-    class_names = {0: "Water", 1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high", 6: "Built-up"}
+    class_names = CLASS_NAMES
 
     # Local 5x5 window (150m buffer) around target to avoid single-pixel noise
     r0, r1 = max(0, tr - 2), min(cfg.HEIGHT, tr + 3)
     c0, c1 = max(0, tc - 2), min(cfg.WIDTH, tc + 3)
-    local_mean = float(np.nanmean(gwpz_index[r0:r1, c0:c1]))
-    local_class = int(np.digitize(local_mean, breaks) + 1)
-    local_class = min(max(local_class, 1), 5)
+    local_mean = finite_mean(gwpz_index[r0:r1, c0:c1])
+    local_class = zone_class(local_mean, breaks)
 
     print(f"      Target Coordinate Cell: {t_score:.1f}/100 ({class_names.get(t_class)})")
     print(f"      Target 150m Parcel Mean: {local_mean:.1f}/100 ({class_names.get(local_class)})")
@@ -230,14 +255,14 @@ def run_water_survey(
         "analyst": cfg.ANALYST,
         "target_coordinates": {"latitude": cfg.TARGET_LAT, "longitude": cfg.TARGET_LON},
         "target_assessment": {
-            "coordinate_cell_score": round(t_score, 1),
+            "coordinate_cell_score": safe_round(t_score, 1),
             "coordinate_cell_class": class_names.get(t_class),
-            "parcel_mean_150m": round(local_mean, 1),
+            "parcel_mean_150m": safe_round(local_mean, 1),
             "parcel_class_150m": class_names.get(local_class),
-            "slope_degrees": round(float(slope[tr, tc]), 2),
-            "twi": round(float(twi_layer[tr, tc]), 2),
-            "lineament_density_pct": round(float(norm_lin[tr, tc]) * 100, 1),
-            "ndvi": round(float(ndvi_layer[tr, tc]), 3),
+            "slope_degrees": safe_round(slope[tr, tc], 2),
+            "twi": safe_round(twi_layer[tr, tc], 2),
+            "lineament_density_pct": safe_round(norm_lin[tr, tc] * 100, 1),
+            "ndvi": safe_round(ndvi_layer[tr, tc], 3),
         },
         "model_weights": cfg.WATER_WEIGHTS,
         "natural_breaks": [round(float(b), 1) for b in breaks],
@@ -265,9 +290,10 @@ def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, can
     colors = ["#1f77b4", "#d73027", "#f46d43", "#fdae61", "#a6d96a", "#1a9850", "#7f7f7f"]
     cmap = ListedColormap(colors)
 
-    # Blend with hillshade
-    base_rgb = cmap(classes / 6.0)[:, :, :3]
-    shaded = np.clip(base_rgb * (0.65 + 0.35 * np.dstack([hs, hs, hs])), 0, 1)
+    # Blend with hillshade. No-data cells are drawn flat gray: without this they
+    # would saturate the palette lookup and print as "Very High Potential".
+    void = classes == NODATA_CLASS
+    shaded = paint_zones(classes, cmap, hs)
 
     ax.imshow(shaded, extent=[0, cfg.WIDTH * cfg.CELL / 1000, 0, cfg.HEIGHT * cfg.CELL / 1000])
 
@@ -298,6 +324,8 @@ def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, can
         Patch(facecolor="#7f7f7f", edgecolor="k", label="Built-up (Excluded)"),
         Patch(facecolor="#1f77b4", edgecolor="k", label="Water Body"),
     ]
+    if void.any():
+        legend_elements.append(Patch(facecolor=NODATA_RGB, edgecolor="k", label="No satellite coverage"))
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
     plt.tight_layout()
@@ -345,7 +373,7 @@ def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]
 
     colors = ["#1f77b4", "#d73027", "#f46d43", "#fdae61", "#a6d96a", "#1a9850", "#7f7f7f"]
     cmap = ListedColormap(colors)
-    shaded = np.clip(cmap(sub_cls / 6.0)[:, :, :3] * (0.65 + 0.35 * np.dstack([sub_hs, sub_hs, sub_hs])), 0, 1)
+    shaded = paint_zones(sub_cls, cmap, sub_hs)
 
     extent = [(c0 - cfg.TARGET_COL) * cfg.CELL / 1000, (c1 - cfg.TARGET_COL) * cfg.CELL / 1000,
               (cfg.TARGET_ROW - r1) * cfg.CELL / 1000, (cfg.TARGET_ROW - r0) * cfg.CELL / 1000]

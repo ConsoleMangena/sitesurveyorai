@@ -16,4 +16,8 @@ services:
         value: "EMPTY_DIR"
       - key: DE_AFRICA_TOKEN
         sync: false # Set your Digital Earth Africa API Key securely in Render Dashboard
+      - key: ALLOWED_ORIGINS
+        sync: false # Comma-separated https origins allowed to call /api/* cross-origin. Blank = CORS disabled (same-origin sandbox still works)
+      - key: ALLOWED_HOSTS
+        sync: false # Comma-separated hostnames for the MCP SSE transport. Setting any value enables DNS-rebinding protection; blank leaves it off for proxy hops
 

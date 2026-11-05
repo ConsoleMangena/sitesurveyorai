@@ -36,6 +36,11 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Start FastAPI + MCP SSE server via Uvicorn
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+# Start FastAPI + MCP SSE server via Uvicorn.
+# One worker is deliberate: the engines read the AOI from process-global src.config and
+# every survey writes the same fixed filenames under /app/outputs. Multiple workers would
+# each hold their own config and lock, so two concurrent requests could analyse different
+# sites while overwriting each other's deliverables. Raise this only after the planned
+# immutable per-job SiteContext + namespaced output directory lands.
+CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
 

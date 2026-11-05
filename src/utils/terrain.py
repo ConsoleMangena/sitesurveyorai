@@ -8,40 +8,44 @@ from __future__ import annotations
 
 import heapq
 import numpy as np
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import binary_dilation, uniform_filter
 
 import src.config as cfg
+
+# Wang & Liu (2006) epsilon: the smallest fill increment that survives float32
+# on ~1 km elevations. It gives true plateaus a monotone micro-slope (about
+# 0.002 degrees per 30 m cell) so flow routing never dead-ends in a flat.
+FILL_EPSILON_M = 1e-3
 
 
 def fill_sinks(dem: np.ndarray) -> np.ndarray:
     """
-    Priority-flood sink filling algorithm (Wang & Liu 2006).
-    Ensures all depressions in the DEM are raised to drain out to borders.
+    Priority-flood sink filling (Wang & Liu 2006).
+
+    Depressions are raised until every cell can drain to an outlet. Outlets are
+    the array border and the rim of every data void, so valid terrain walled in
+    by missing data is still filled instead of being silently dropped.
     """
     h, w = dem.shape
     filled = np.full((h, w), np.nan, dtype="float32")
     visited = np.zeros((h, w), dtype=bool)
     heap: list[tuple[float, int, int]] = []
 
-    # Initialize border cells into priority queue
-    for r in range(h):
-        for c in (0, w - 1):
-            val = float(dem[r, c])
-            if np.isfinite(val):
-                heapq.heappush(heap, (val, r, c))
-                filled[r, c] = val
-                visited[r, c] = True
+    valid = np.isfinite(dem)
+    border = np.zeros((h, w), dtype=bool)
+    border[0, :] = True
+    border[-1, :] = True
+    border[:, 0] = True
+    border[:, -1] = True
+    void_rim = binary_dilation(~valid, structure=np.ones((3, 3), dtype=bool))
+    seeds = np.argwhere(valid & (border | void_rim))
 
-    for c in range(w):
-        for r in (0, h - 1):
-            if not visited[r, c]:
-                val = float(dem[r, c])
-                if np.isfinite(val):
-                    heapq.heappush(heap, (val, r, c))
-                    filled[r, c] = val
-                    visited[r, c] = True
+    for r, c in seeds:
+        val = float(dem[r, c])
+        filled[r, c] = val
+        visited[r, c] = True
+        heapq.heappush(heap, (val, int(r), int(c)))
 
-    # Process priority queue
     neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
     while heap:
         elev, r, c = heapq.heappop(heap)
@@ -51,7 +55,7 @@ def fill_sinks(dem: np.ndarray) -> np.ndarray:
                 visited[nr, nc] = True
                 val = float(dem[nr, nc])
                 if np.isfinite(val):
-                    spill = max(elev, val)
+                    spill = max(elev, val) + FILL_EPSILON_M
                     filled[nr, nc] = spill
                     heapq.heappush(heap, (spill, nr, nc))
 
@@ -99,7 +103,9 @@ def d8_flow(filled: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     best_dir = np.argmax(slopes, axis=0).astype("int8")
     flow_dir = np.where(max_slope > 0, best_dir, -1).astype("int8")
 
-    # Clear border cells
+    # Border cells are outflow boundaries: they keep everything they receive but
+    # pass nothing on, so accumulation is complete up to the edge of the AOI and
+    # any channel that leaves the window is truncated there.
     flow_dir[0, :] = -1
     flow_dir[-1, :] = -1
     flow_dir[:, 0] = -1
@@ -120,14 +126,30 @@ def d8_flow(filled: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             if 0 <= nr < h and 0 <= nc < w:
                 flow_acc[nr, nc] += flow_acc[r, c]
 
+    # A data void has no catchment. Leaving it at 1 would read as "a dry slope".
+    flow_acc[~valid] = np.nan
+
     return flow_dir, flow_acc
+
+
+def _stencil_reaches_void(dem: np.ndarray) -> np.ndarray:
+    """
+    Cells whose finite-difference stencil touches a data void.
+
+    np.gradient takes the central difference (f[i+1] - f[i-1]) / 2h, which skips
+    the sample in the middle: a lone void would otherwise report as flat ground
+    and then be used as evidence.
+    """
+    return binary_dilation(~np.isfinite(dem), structure=np.ones((3, 3), dtype=bool))
 
 
 def slope_degrees(dem: np.ndarray) -> np.ndarray:
     """Compute terrain slope in degrees using 2D finite difference gradients."""
     gy, gx = np.gradient(dem, cfg.CELL)
     slope_rad = np.arctan(np.hypot(gx, gy))
-    return np.degrees(slope_rad)
+    slope = np.degrees(slope_rad).astype("float32")
+    slope[_stencil_reaches_void(dem)] = np.nan
+    return slope
 
 
 def terrain_hillshade(dem: np.ndarray, az: float = 315.0, alt: float = 45.0) -> np.ndarray:
@@ -142,7 +164,9 @@ def terrain_hillshade(dem: np.ndarray, az: float = 315.0, alt: float = 45.0) -> 
     alt_rad = np.radians(alt)
 
     hs = np.sin(alt_rad) * np.cos(slope) + np.cos(alt_rad) * np.sin(slope) * np.cos(az_rad - aspect)
-    return np.clip(hs, 0.0, 1.0).astype("float32")
+    hs = np.clip(hs, 0.0, 1.0).astype("float32")
+    hs[_stencil_reaches_void(dem)] = np.nan
+    return hs
 
 
 def twi(filled: np.ndarray, slope_deg_arr: np.ndarray, flow_acc: np.ndarray | None = None) -> np.ndarray:
@@ -150,6 +174,12 @@ def twi(filled: np.ndarray, slope_deg_arr: np.ndarray, flow_acc: np.ndarray | No
     Compute Topographic Wetness Index:
         TWI = ln(As / tan(beta))
     where As is specific catchment area (m) and beta is slope in radians.
+
+    Pass the slope of the *filled* surface: routing flow over sinks while
+    measuring slope on the unfilled DEM puts the two terms of the ratio on
+    different surfaces. Slope is floored at 0.1 degrees because tan(0) would
+    divide by zero on true flats; negative TWI is kept, as on steep dry slopes
+    the index is legitimately below zero.
     """
     if flow_acc is None:
         _, flow_acc = d8_flow(filled)
@@ -159,23 +189,42 @@ def twi(filled: np.ndarray, slope_deg_arr: np.ndarray, flow_acc: np.ndarray | No
     slope_rad = np.radians(np.maximum(slope_deg_arr, 0.1))
     tan_slope = np.maximum(np.tan(slope_rad), 0.001)
 
-    twi_val = np.log(specific_area / tan_slope)
-    return np.maximum(twi_val, 0.0).astype("float32")
+    return np.log(specific_area / tan_slope).astype("float32")
 
 
-def drainage_density(flow_acc: np.ndarray, threshold: int = 500, kernel_radius: int = 17) -> np.ndarray:
+def drainage_density(
+    flow_acc: np.ndarray,
+    threshold: int = 500,
+    kernel_radius: int = 17,
+    valid_mask: np.ndarray | None = None,
+    min_observed_fraction: float = 0.34,
+) -> np.ndarray:
     """
-    Extract channel network where flow_acc > threshold and compute drainage density (km/km2).
+    Extract channel network where flow_acc > threshold and compute drainage
+    density in km/km² of observed surface.
+
+    Windows dominated by data voids return NaN: an area the DEM does not cover
+    is not an area with no streams.
     """
-    streams = (flow_acc > threshold).astype("float32")
+    streams = np.where(np.isfinite(flow_acc), flow_acc > threshold, 0.0).astype("float32")
     size = kernel_radius * 2 + 1
-    # Mean stream fraction within the neighborhood window
-    density = uniform_filter(streams, size=size, mode="reflect")
-    # Convert cell count fraction to km per km2:
-    # In each cell (30x30m), a stream pixel represents ~30m of stream length.
-    # Total area per cell = 900 m2. density (fraction) * (0.03 km / 0.0009 km2) = density * 33.3 km/km2
-    km_per_km2 = density * (cfg.CELL / 1000.0) / ((cfg.CELL * cfg.CELL) / 1e6)
-    return km_per_km2.astype("float32")
+
+    observed = (
+        np.ones_like(streams)
+        if valid_mask is None
+        else np.asarray(valid_mask, dtype="float32")
+    )
+    fraction = uniform_filter(streams, size=size, mode="reflect")
+    obs_fraction = uniform_filter(observed, size=size, mode="reflect")
+
+    # Each stream cell stands for CELL metres of channel inside CELL² metres of ground.
+    km_per_km2 = (cfg.CELL / 1000.0) / ((cfg.CELL * cfg.CELL) / 1e6)
+    density = np.where(
+        obs_fraction >= min_observed_fraction,
+        fraction / np.maximum(obs_fraction, 1e-6) * km_per_km2,
+        np.nan,
+    )
+    return density.astype("float32")
 
 
 def stream_power_index(flow_acc: np.ndarray, slope_deg_arr: np.ndarray) -> np.ndarray:
