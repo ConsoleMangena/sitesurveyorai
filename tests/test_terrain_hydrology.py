@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.ndimage import binary_dilation, generic_filter
 
 import src.config as cfg
 from src.utils.terrain import (
     d8_flow,
     drainage_density,
     fill_sinks,
+    local_relief,
     slope_degrees,
     twi,
 )
@@ -135,3 +137,35 @@ def test_slope_is_zero_on_a_flat_and_voids_stay_void():
     assert slope[0, 0] == pytest.approx(0.0)
     assert np.isnan(slope[4, 4])
     assert np.isnan(slope[3, 4]), "gradient must not invent slope beside a void"
+
+
+def test_relief_averages_only_observed_cells():
+    """A 15x15 box filter over a DEM with a few percent holes returns NaN for nearly every
+    window, which voided the entire mineral index. The neighbourhood mean must be taken
+    over observed cells only."""
+    rng = np.random.default_rng(7)
+    dem = (100.0 + 20.0 * rng.random((41, 41))).astype("float32")
+    voids = rng.random(dem.shape) < 0.03
+    dem[voids] = np.nan
+
+    relief = local_relief(dem, window_px=15)
+    reference = generic_filter(
+        dem, np.nanmean, size=15, mode="reflect",
+        output="float64",
+    ) - dem
+
+    assert np.isfinite(relief[~voids]).all(), "observed ground lost to a neighbouring hole"
+    assert np.isnan(relief[voids]).all(), "unobserved cell given a relief value"
+    # generic_filter has no NaN-aware mode, so only windows free of holes are comparable.
+    clean = ~voids & ~binary_dilation(voids, iterations=7)
+    assert relief[clean] == pytest.approx(reference[clean], abs=1e-4)
+
+
+def test_relief_of_a_hole_surrounded_by_holes_is_no_data():
+    dem = np.full((21, 21), 300.0, dtype="float32")
+    dem[4:18, 4:18] = np.nan
+
+    relief = local_relief(dem, window_px=15)
+
+    assert np.isnan(relief[10, 10]), "a window with no observed cells reported a mean"
+    assert np.isfinite(relief[0, 0])

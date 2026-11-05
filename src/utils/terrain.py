@@ -169,6 +169,27 @@ def terrain_hillshade(dem: np.ndarray, az: float = 315.0, alt: float = 45.0) -> 
     return hs
 
 
+def local_relief(dem: np.ndarray, window_px: int = 15) -> np.ndarray:
+    """
+    Height of each cell above the mean of its neighbourhood.
+
+    A box filter over NaN terrain poisons every window that touches a void, and with real
+    DEM holes that is effectively the whole grid — the mean is taken over observed cells
+    so a hole costs the cells around it, not the survey.
+    """
+    observed = np.isfinite(dem)
+    if observed.all():
+        neighbourhood_mean = uniform_filter(dem, size=window_px, mode="reflect")
+    else:
+        total = uniform_filter(np.where(observed, dem, 0.0), size=window_px, mode="reflect")
+        count = uniform_filter(observed.astype("float64"), size=window_px, mode="reflect")
+        neighbourhood_mean = np.divide(
+            total, count, out=np.full(count.shape, np.nan), where=count > 0
+        )
+    relief = np.where(observed, neighbourhood_mean - dem, np.nan)
+    return relief.astype("float32")
+
+
 def twi(filled: np.ndarray, slope_deg_arr: np.ndarray, flow_acc: np.ndarray | None = None) -> np.ndarray:
     """
     Compute Topographic Wetness Index:

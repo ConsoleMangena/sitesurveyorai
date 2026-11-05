@@ -50,7 +50,7 @@ from src.utils.classification import (
 from src.utils.lineaments import detect_lineaments, extract_edges, lineament_density, lineament_intersections
 from src.utils.raster import robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import ferrous_index, hydroxyl_index, iron_oxide_index, ndvi, residual_index
-from src.utils.terrain import slope_degrees, terrain_hillshade
+from src.utils.terrain import local_relief, slope_degrees, terrain_hillshade
 
 
 def run_minerals_survey(
@@ -113,8 +113,7 @@ def run_minerals_survey(
     # 4. Terrain Roughness & Regional Endowment Context
     print("[4/6] Modeling terrain roughness and mineral endowment decay...")
     slope = slope_degrees(dem)
-    from scipy.ndimage import uniform_filter
-    relief = uniform_filter(dem, size=15) - dem  # Relative local relief
+    relief = local_relief(dem)  # Height above the mean of the observed neighbourhood
 
     # Known deposit locations (e.g. Golden Quarry Mine: -19.6127 S, 29.9842 E)
     from src.utils.raster import lonlat_to_pixel
@@ -259,7 +258,7 @@ def run_minerals_survey(
 
 def _render_minerals_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, candidates: list[dict]):
     """Render high-resolution classified mineral prospectivity map."""
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+    fig, ax = plt.subplots(figsize=(10, 10), dpi=cfg.MAP_DPI)
 
     colors = ["#1f77b4", "#4575b4", "#74add1", "#fee090", "#f46d43", "#d73027", "#7f7f7f"]
     cmap = ListedColormap(colors)
@@ -298,13 +297,13 @@ def _render_minerals_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray,
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "mineral_prospectivity_map.png", dpi=200)
+    safe_savefig(plt, cfg.OUT / "mineral_prospectivity_map.png", dpi=cfg.MAP_DPI)
     plt.close()
 
 
 def _render_minerals_evidence(lin, inter, iron, hyd, fer, relief, endow):
     """Render diagnostic panel of mineral evidence layers."""
-    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=180)
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=cfg.MAP_DPI)
     panels = [
         ("Lineament Density", lin, "plasma"),
         ("Intersection Density", inter, "magma"),
@@ -324,7 +323,7 @@ def _render_minerals_evidence(lin, inter, iron, hyd, fer, relief, endow):
     axes.flat[7].axis("off")
     plt.suptitle(f"SiteSurveyor AI — Mineral Prospectivity Evidence Layers [{cfg.CLIENT}]", fontsize=13, color=cfg.BRAND_COLOR, y=0.98)
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "mineral_evidence_layers.png", dpi=180)
+    safe_savefig(plt, cfg.OUT / "mineral_evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close()
 
 
