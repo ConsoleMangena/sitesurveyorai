@@ -17,12 +17,20 @@ ENV GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
 # SQLite-backed coordinate-database load links against libexpat.so.1. python:*-slim
 # does not ship it, so "import rasterio" raises ImportError in the container and the
 # instance restarts in a loop before /health is ever reachable.
+# proj-data settles a second clash: pyproj points PROJ_DATA at its own bundled proj.db,
+# rasterio's newer vendored libproj rejects it ("DATABASE.LAYOUT.VERSION.MINOR = 4
+# whereas a number >= 6 is expected. It comes from another PROJ installation") and every
+# CRS lookup dies. One system dataset is the only version both wheels can read.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     libgomp1 \
     libexpat1 \
+    proj-data \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PROJ_DATA=/usr/share/proj \
+    PROJ_LIB=/usr/share/proj
 
 WORKDIR /app
 
