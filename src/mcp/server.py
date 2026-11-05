@@ -167,6 +167,7 @@ def survey_site(
     categories: list[str] = ["all"],
     client_name: str = "Client",
     address: str = "",
+    half_deg: float = 0.08,
 ) -> dict:
     """
     Execute a comprehensive satellite screening survey across requested categories.
@@ -183,7 +184,7 @@ def survey_site(
         lists, primary GPS recommendations, and paths to maps, KMZ vectors, and the
         executive HTML dossier.
     """
-    cfg.set_target_site(latitude, longitude, client=client_name, address=address or None)
+    cfg.set_target_site(latitude, longitude, half_deg=half_deg, client=client_name, address=address or None)
     _report_progress("Acquiring satellite layers", 6)
     _ensure_data_present()
 

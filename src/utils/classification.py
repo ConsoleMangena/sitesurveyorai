@@ -157,12 +157,12 @@ def paint_zones(
     no-data cell would otherwise print as the top class. Voids are painted flat
     gray and unobserved terrain is shaded neutrally.
     """
-    rgb = np.asarray(cmap(np.clip(classes / 6.0, 0.0, 1.0))[..., :3], dtype="float64")
+    rgb = np.asarray(cmap(np.clip(classes / 6.0, 0.0, 1.0))[..., :3], dtype="float32")
     rgb[classes == NODATA_CLASS] = NODATA_RGB
 
     if hillshade is not None:
-        hs = np.where(np.isfinite(hillshade), hillshade, 0.5)
-        rgb = np.clip(rgb * (0.65 + 0.35 * hs[..., None]), 0.0, 1.0)
+        hs = np.where(np.isfinite(hillshade), hillshade, np.float32(0.5)).astype("float32")
+        rgb = np.clip(rgb * (0.65 + 0.35 * hs[..., None]), 0.0, 1.0).astype("float32")
 
     return rgb
 

@@ -233,6 +233,8 @@ def run_minerals_survey(
     # Maps
     _render_minerals_map(gold_index, classes, hs, candidates)
     _render_minerals_evidence(norm_lin, norm_inter, norm_iron, norm_hyd, norm_fer, norm_relief, norm_endow)
+    del gold_index, classes, hs, norm_lin, norm_inter, norm_iron, norm_hyd, norm_fer, norm_relief, norm_endow
+    gc.collect()
 
     # JSON Summary
     summary = {

@@ -21,6 +21,8 @@ Outputs (outputs/):
 """
 from __future__ import annotations
 
+import gc
+
 import csv
 import json
 import os
@@ -394,6 +396,9 @@ def _plot_hazard_map(hazard_index, hazard_zones, safest_sites):
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "hazard_risk_map.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, ax
+    gc.collect()
     print("  [OK] hazard_risk_map.png")
 
 
@@ -442,6 +447,9 @@ def _plot_hazard_evidence(flood, slope, erosion, fire, drought):
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "hazard_evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, axes
+    gc.collect()
     print("  [OK] hazard_evidence_layers.png")
 
 
@@ -501,6 +509,9 @@ def _plot_hazard_zoom(hazard_index, hazard_zones, safest_sites):
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "site_hazard_zoom.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, ax
+    gc.collect()
     print("  [OK] site_hazard_zoom.png")
 
 

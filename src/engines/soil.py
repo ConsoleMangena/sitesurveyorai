@@ -22,6 +22,8 @@ Outputs (outputs/):
 """
 from __future__ import annotations
 
+import gc
+
 import json
 import os
 import sys
@@ -433,6 +435,9 @@ def _plot_soil_map(sci, zones, candidates):
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "soil_capability_map.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, ax
+    gc.collect()
     print("  [OK] soil_capability_map.png")
 
 
@@ -461,6 +466,9 @@ def _plot_evidence_layers(erosion, moisture, veg, lc_suit, wetness, rainfall, lc
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "soil_evidence_layers.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, axes
+    gc.collect()
     print("  [OK] soil_evidence_layers.png")
 
 
@@ -522,6 +530,9 @@ def _plot_zone_zoom(sci, zones, candidates):
     fig.tight_layout()
     safe_savefig(fig, cfg.OUT / "soil_zone_zoom.png", dpi=cfg.MAP_DPI)
     plt.close(fig)
+    plt.close("all")
+    del fig, ax
+    gc.collect()
     print("  [OK] soil_zone_zoom.png")
 
 

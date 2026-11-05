@@ -19,6 +19,10 @@ ENV SITESURVEYOR_STATE_DIR=/app/state
 # on every open, which turns each layer read into a multi-second stall.
 # PORT is deliberately not set here — the platform injects it at runtime.
 ENV GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+# Strict memory caps to prevent OOM on 512MB RAM cloud tiers
+ENV GDAL_CACHEMAX=32
+ENV MAP_DPI=90
+ENV MALLOC_TRIM_THRESHOLD_=65536
 
 # Install runtime dependencies.
 # libexpat1 is not optional: the manylinux rasterio wheel vendors GDAL/PROJ, whose

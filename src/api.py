@@ -352,6 +352,7 @@ def _run_survey(payload: dict, base_url: str) -> dict:
             categories=payload["categories"],
             client_name=payload["client_name"],
             address=payload["address"],
+            half_deg=half_deg,
         )
 
     urls, missing = _deliverables(base_url)

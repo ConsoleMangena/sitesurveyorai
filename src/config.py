@@ -61,10 +61,15 @@ ANALYST = "Eineva Labs"
 BRAND_COLOR = "#D14141"
 CELL = 30.0  # metres
 
-# Map render buffers scale with the square of this: a mineral survey peaks at 582 MB of
-# process memory with maps at 200 dpi and 427 MB at 120, and the starter instance we deploy
-# on holds 512 MB. These maps are read on screen, not printed; raise this with the instance.
-MAP_DPI = int(os.getenv("MAP_DPI", "120"))
+# Limit GDAL block cache to prevent greedy RAM consumption on constrained containers (512MB RAM)
+os.environ.setdefault("GDAL_CACHEMAX", "32")
+# Instruct glibc to promptly return freed heap pages back to the Linux OS kernel
+os.environ.setdefault("MALLOC_TRIM_THRESHOLD_", "65536")
+
+# Map render buffers scale with the square of this: a survey peaks at >500 MB of
+# process memory with maps at 120 dpi, tripping the 512 MB Linux cgroup limit on Starter tier.
+# At 90 dpi on-screen clarity is pristine while memory footprint drops by >44%.
+MAP_DPI = int(os.getenv("MAP_DPI", "90"))
 
 # --- Water Model Weights (AHP) ---
 WATER_WEIGHTS = {

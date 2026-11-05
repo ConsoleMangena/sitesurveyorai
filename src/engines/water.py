@@ -15,6 +15,8 @@ Evidence layers:
 """
 from __future__ import annotations
 
+import gc
+
 import csv
 import json
 import os
@@ -102,6 +104,8 @@ def run_water_survey(
     twi_layer = twi(filled, flow_slope, flow_acc=flow_acc)
     drain_dens = drainage_density(flow_acc, threshold=500, kernel_radius=17,
                                  valid_mask=np.isfinite(filled))
+    del filled, flow_slope, flow_acc
+    gc.collect()
 
     # 3. Structural fracture extraction
     print("[3/6] Detecting structural lineaments (SAR + DEM hillshade)...")
@@ -109,6 +113,8 @@ def run_water_survey(
     segments = detect_lineaments(edges, threshold=25, min_length_px=30, line_gap_px=5, min_length_meters=600.0)
     lin_dens = lineament_density(segments, kernel_radius_px=17,
                                  valid_mask=np.isfinite(alos_hv) & np.isfinite(hs))
+    del edges, alos_hv
+    gc.collect()
     print(f"      Extracted {len(segments)} valid regional lineament segments "
           f"(>= {effective_min_length_m(30, 600.0):.0f} m at {cfg.CELL:.0f} m cells)")
 
@@ -134,6 +140,8 @@ def run_water_survey(
         infil[lc == k] = v
 
     ndvi_layer = ndvi(nir, red)
+    del red, nir
+    gc.collect()
 
     # 5. Evidence normalization & weighted overlay
     print("[5/6] Multi-criteria weighted overlay (AHP)...")
@@ -158,6 +166,8 @@ def run_water_survey(
 
     # Rescale to 0-100 continuous index
     gwpz_index = robust_norm(index_raw) * 100.0
+    del index_raw, norm_slope, norm_twi, norm_infil, norm_drain, norm_rain, norm_ndvi
+    gc.collect()
 
     # Masks for water and settlements
     water_mask = (lc == 80)
@@ -242,10 +252,21 @@ def run_water_survey(
             "percentage": round(count / (cfg.WIDTH * cfg.HEIGHT) * 100.0, 1),
         }
 
+    # Save scalar indicators before releasing evidence rasters
+    t_slope = safe_round(slope[tr, tc], 2)
+    t_twi = safe_round(twi_layer[tr, tc], 2)
+    t_lin = safe_round(norm_lin[tr, tc] * 100, 1)
+    t_ndvi = safe_round(ndvi_layer[tr, tc], 3)
+    del norm_lin
+
     # E. Render Cartographic Maps
-    _render_main_map(gwpz_index, classes, hs, candidates, breaks)
     _render_evidence_map(dem, slope, twi_layer, lin_dens, ndvi_layer, rain, infil, drain_dens)
+    del dem, slope, twi_layer, lin_dens, ndvi_layer, rain, infil, drain_dens
+    gc.collect()
+
+    _render_main_map(gwpz_index, classes, hs, candidates, breaks)
     _render_zoom_map(classes, hs, candidates)
+    gc.collect()
 
     # F. Save JSON Summary
     summary = {
@@ -259,10 +280,10 @@ def run_water_survey(
             "coordinate_cell_class": class_names.get(t_class),
             "parcel_mean_150m": safe_round(local_mean, 1),
             "parcel_class_150m": class_names.get(local_class),
-            "slope_degrees": safe_round(slope[tr, tc], 2),
-            "twi": safe_round(twi_layer[tr, tc], 2),
-            "lineament_density_pct": safe_round(norm_lin[tr, tc] * 100, 1),
-            "ndvi": safe_round(ndvi_layer[tr, tc], 3),
+            "slope_degrees": t_slope,
+            "twi": t_twi,
+            "lineament_density_pct": t_lin,
+            "ndvi": t_ndvi,
         },
         "model_weights": cfg.WATER_WEIGHTS,
         "natural_breaks": [round(float(b), 1) for b in breaks],
@@ -328,9 +349,12 @@ def _render_main_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray, can
         legend_elements.append(Patch(facecolor=NODATA_RGB, edgecolor="k", label="No satellite coverage"))
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
-    plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "groundwater_potential_map.png", dpi=cfg.MAP_DPI)
-    plt.close()
+    fig.tight_layout()
+    safe_savefig(fig, cfg.OUT / "groundwater_potential_map.png", dpi=cfg.MAP_DPI)
+    plt.close(fig)
+    plt.close("all")
+    del fig, ax, shaded
+    gc.collect()
 
 
 def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain):
@@ -354,9 +378,12 @@ def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.suptitle(f"SiteSurveyor AI — Groundwater Evidence Layers [{cfg.CLIENT}]", fontsize=13, color=cfg.BRAND_COLOR, y=0.98)
-    plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "evidence_layers.png", dpi=cfg.MAP_DPI)
-    plt.close()
+    fig.tight_layout()
+    safe_savefig(fig, cfg.OUT / "evidence_layers.png", dpi=cfg.MAP_DPI)
+    plt.close(fig)
+    plt.close("all")
+    del fig, axes
+    gc.collect()
 
 
 def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]):
@@ -395,9 +422,12 @@ def _render_zoom_map(classes: np.ndarray, hs: np.ndarray, candidates: list[dict]
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.legend(loc="lower right", fontsize=8)
 
-    plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "site_zoom_map.png", dpi=cfg.MAP_DPI)
-    plt.close()
+    fig.tight_layout()
+    safe_savefig(fig, cfg.OUT / "site_zoom_map.png", dpi=cfg.MAP_DPI)
+    plt.close(fig)
+    plt.close("all")
+    del fig, ax, shaded
+    gc.collect()
 
 
 if __name__ == "__main__":

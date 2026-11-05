@@ -113,7 +113,9 @@ def lonlat_to_pixel(lon: float, lat: float) -> tuple[int, int]:
     return row, col
 
 
-def safe_savefig(fig, path: Path, dpi: int = 200, retries: int = 4) -> None:
+def safe_savefig(fig, path: Path, dpi: int | None = None, retries: int = 4) -> None:
+    if dpi is None:
+        dpi = cfg.MAP_DPI
     """
     Save a matplotlib figure, retrying transient Windows file locks.
 
