@@ -58,7 +58,7 @@ if API_KEY:
 
 # --- Branding & Grid Base Constants ---
 ANALYST = "Eineva Labs"
-BRAND_COLOR = "#0b4f6c"
+BRAND_COLOR = "#D14141"
 CELL = 30.0  # metres
 
 # Map render buffers scale with the square of this: a mineral survey peaks at 582 MB of

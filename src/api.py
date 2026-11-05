@@ -506,6 +506,30 @@ async def robots():
     return "User-agent: *\nAllow: /\n"
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    ico = ROOT_DIR / "src" / "static" / "SiteSurveyor.ico"
+    if ico.exists():
+        return FileResponse(ico)
+    return Response(status_code=404)
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    svg = ROOT_DIR / "src" / "static" / "favicon.svg"
+    if svg.exists():
+        return FileResponse(svg, media_type="image/svg+xml")
+    return Response(status_code=404)
+
+
+@app.get("/logo.svg", include_in_schema=False)
+async def logo_svg():
+    svg = ROOT_DIR / "src" / "static" / "logo.svg"
+    if svg.exists():
+        return FileResponse(svg, media_type="image/svg+xml")
+    return Response(status_code=404)
+
+
 # ---------------------------------------------------------------------------
 # Health & Status
 # ---------------------------------------------------------------------------
@@ -716,10 +740,14 @@ def get_report_endpoint():
 
 
 # ---------------------------------------------------------------------------
-# Static Deliverables Serving (/outputs/...)
+# Static Deliverables Serving (/outputs/...) & Static Assets (/static/...)
 # ---------------------------------------------------------------------------
 cfg.OUT.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs", StaticFiles(directory=str(cfg.OUT), html=True), name="outputs")
+
+STATIC_DIR = ROOT_DIR / "src" / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ---------------------------------------------------------------------------

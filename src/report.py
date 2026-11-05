@@ -250,225 +250,397 @@ def _build_html_report(dossier: dict) -> str:
 
     def score_color(val):
         if val is None:
-            return "#777777"
+            return "#64748b"
         if val >= 75:
-            return "#1a9850"
+            return "#10b981"
         elif val >= 55:
-            return "#91cf60"
+            return "#f59e0b"
         elif val >= 40:
-            return "#f49d37"
+            return "#f97316"
         else:
-            return "#d73027"
+            return "#ef4444"
 
     def hazard_color(val):
         if val is None:
-            return "#777777"
+            return "#64748b"
         if val <= 30:
-            return "#1a9850"
+            return "#10b981"
         elif val <= 50:
-            return "#f49d37"
+            return "#f59e0b"
         else:
-            return "#d73027"
+            return "#ef4444"
+
+    logo_svg_path = Path(__file__).resolve().parent / "static" / "logo.svg"
+    logo_data_uri = "/logo.svg"
+    if logo_svg_path.exists():
+        try:
+            b64_logo = base64.b64encode(logo_svg_path.read_bytes()).decode("ascii")
+            logo_data_uri = f"data:image/svg+xml;base64,{b64_logo}"
+        except Exception:
+            logo_data_uri = "/logo.svg"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>SiteSurveyor AI — Executive Site Intelligence Dossier</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    :root {{
+      --brand: {cfg.BRAND_COLOR};
+      --brand-hover: #BB2B2C;
+      --brand-muted: rgba(209, 65, 65, 0.12);
+      --brand-border: rgba(209, 65, 65, 0.32);
+      --font-sans: 'Inter', 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+      --water: #38bdf8;
+      --mineral: #f59e0b;
+      --soil: #10b981;
+      --hazard: #f43f5e;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --line: #e2e8f0;
+      --line-strong: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --dim: #94a3b8;
+    }}
+
+    * {{ box-sizing: border-box; }}
+
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-sans);
       margin: 0;
       padding: 0;
-      background-color: #f7f9fa;
-      color: #2c3e50;
+      background-color: var(--bg);
+      color: var(--text);
       line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }}
+
+    .mono {{
+      font-family: var(--font-mono);
+    }}
+
+    /* Header */
     .header {{
-      background: linear-gradient(135deg, {cfg.BRAND_COLOR} 0%, #062b3b 100%);
+      background: #090d16;
+      border-top: 4px solid var(--brand);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       color: #ffffff;
-      padding: 35px 50px;
+      padding: 36px 48px;
     }}
-    .header h1 {{
-      margin: 0 0 10px 0;
-      font-size: 28px;
-      letter-spacing: -0.5px;
-    }}
-    .header .subtitle {{
-      font-size: 14px;
-      opacity: 0.85;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }}
-    .meta-bar {{
-      background: #ffffff;
-      border-bottom: 1px solid #e1e8ed;
-      padding: 15px 50px;
+    .header-inner {{
+      max-width: 1200px;
+      margin: 0 auto;
       display: flex;
       flex-wrap: wrap;
-      gap: 30px;
-      font-size: 13px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }}
+    .header-brand {{
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }}
+    .brand-mark {{
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      background: #111625;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      flex: 0 0 auto;
+    }}
+    .brand-logo {{
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }}
+    .header h1 {{
+      margin: 0 0 6px 0;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .header-badge {{
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: var(--brand);
+      background: var(--brand-muted);
+      border: 1px solid var(--brand-border);
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }}
+    .header .subtitle {{
+      font-size: 12px;
+      color: #94a3b8;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      font-weight: 500;
+    }}
+    .header-client {{
+      background: #111625;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 12.5px;
+      color: #cbd5e1;
+    }}
+    .header-client strong {{
+      color: #ffffff;
+    }}
+
+    /* Meta bar */
+    .meta-bar {{
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      padding: 14px 48px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 28px;
+      font-size: 12.5px;
+      color: var(--text-muted);
     }}
     .meta-item strong {{
-      color: {cfg.BRAND_COLOR};
+      color: var(--text);
+      font-weight: 600;
+      margin-right: 4px;
     }}
+    .meta-item span {{
+      font-family: var(--font-mono);
+      color: var(--brand);
+    }}
+
+    /* Main Container */
     .container {{
       max-width: 1200px;
-      margin: 30px auto;
-      padding: 0 30px;
+      margin: 32px auto;
+      padding: 0 24px;
     }}
+
+    .section-title {{
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text);
+      margin: 36px 0 16px 0;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--brand);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+
+    /* Scorecards */
     .scorecard-grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
+      gap: 18px;
       margin-bottom: 35px;
     }}
     .card {{
-      background: #ffffff;
-      border-radius: 8px;
-      padding: 24px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      border-top: 4px solid {cfg.BRAND_COLOR};
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      border-top: 4px solid var(--brand);
+      transition: transform 0.15s, box-shadow 0.15s;
     }}
+    .card--water {{ border-top-color: var(--water); }}
+    .card--mineral {{ border-top-color: var(--mineral); }}
+    .card--soil {{ border-top-color: var(--soil); }}
+    .card--hazard {{ border-top-color: var(--hazard); }}
+
     .card h3 {{
-      margin: 0 0 15px 0;
-      font-size: 15px;
+      margin: 0 0 12px 0;
+      font-size: 12.5px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #555;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
     }}
     .big-score {{
-      font-size: 42px;
-      font-weight: 800;
+      font-family: var(--font-mono);
+      font-size: 38px;
+      font-weight: 700;
       line-height: 1;
       margin-bottom: 8px;
     }}
     .score-badge {{
       display: inline-block;
       padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 12px;
+      border-radius: 999px;
+      font-size: 11.5px;
       font-weight: 600;
       color: #ffffff;
       margin-bottom: 12px;
     }}
     .detail-line {{
       font-size: 12px;
-      color: #666;
-      border-top: 1px solid #f0f0f0;
+      color: var(--text-muted);
+      border-top: 1px solid var(--line);
       padding-top: 8px;
       margin-top: 8px;
     }}
-    .section-title {{
-      font-size: 20px;
-      font-weight: 700;
-      color: {cfg.BRAND_COLOR};
-      margin: 40px 0 20px 0;
-      padding-bottom: 8px;
-      border-bottom: 2px solid {cfg.BRAND_COLOR};
+    .detail-line strong {{
+      color: var(--text);
     }}
+
+    /* Actionable Table */
     .target-table {{
       width: 100%;
       border-collapse: collapse;
-      background: #ffffff;
-      border-radius: 8px;
+      background: var(--surface);
+      border-radius: 10px;
       overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      margin-bottom: 30px;
-      font-size: 13px;
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      margin-bottom: 35px;
+      font-size: 12.5px;
     }}
     .target-table th {{
       background: #f1f5f9;
       color: #334155;
       text-align: left;
-      padding: 12px 16px;
-      font-weight: 600;
+      padding: 12px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--line);
     }}
     .target-table td {{
-      padding: 12px 16px;
-      border-top: 1px solid #f1f5f9;
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      color: var(--text);
     }}
+    .target-table tr:hover {{
+      background: #f8fafc;
+    }}
+
+    /* Maps Grid */
     .maps-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-      gap: 25px;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 22px;
       margin-bottom: 35px;
     }}
     .map-box {{
-      background: #ffffff;
-      border-radius: 8px;
-      padding: 15px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     }}
     .map-box h4 {{
       margin: 0 0 10px 0;
-      font-size: 14px;
-      color: {cfg.BRAND_COLOR};
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
     }}
     .map-box img {{
       width: 100%;
       height: auto;
-      border-radius: 4px;
-      border: 1px solid #e1e8ed;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      display: block;
     }}
+
+    /* Banners & Notes */
     .status-banner {{
-      background: #fff4e5;
-      border-left: 4px solid #f49d37;
-      border-radius: 4px;
+      background: #fffbeb;
+      border-left: 4px solid var(--mineral);
+      border: 1px solid #fde68a;
+      border-left-width: 4px;
+      border-radius: 6px;
       padding: 14px 18px;
-      font-size: 13px;
-      color: #7a4b10;
+      font-size: 12.5px;
+      color: #92400e;
       margin-bottom: 25px;
     }}
     .note {{
       font-size: 12px;
-      color: #52616f;
-      background: #eef4f7;
-      border-radius: 4px;
+      color: var(--text-muted);
+      background: #f1f5f9;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       padding: 10px 14px;
       margin: -4px 0 18px 0;
     }}
     .attribution {{
-      font-size: 11px;
-      color: #5b6b7a;
+      font-size: 11.5px;
+      color: #64748b;
       line-height: 1.55;
-      border-top: 1px solid #e1e8ed;
+      border-top: 1px solid var(--line);
       padding-top: 16px;
-      margin: 25px 0 0 0;
+      margin: 28px 0 0 0;
     }}
     .disclaimer {{
-      background: #fff8e6;
-      border-left: 4px solid #f49d37;
-      padding: 18px 22px;
-      border-radius: 4px;
+      background: #fff8f8;
+      border: 1px solid #fed7d7;
+      border-left: 4px solid var(--brand);
+      padding: 16px 20px;
+      border-radius: 6px;
       font-size: 12px;
-      color: #7a5210;
-      margin: 40px 0;
+      color: #742a2a;
+      line-height: 1.6;
+      margin: 36px 0;
     }}
     .footer {{
       text-align: center;
-      padding: 30px;
+      padding: 28px;
       font-size: 12px;
-      color: #888;
-      border-top: 1px solid #e1e8ed;
-      background: #ffffff;
+      color: var(--text-muted);
+      border-top: 1px solid var(--line);
+      background: var(--surface);
     }}
   </style>
 </head>
 <body>
 
   <div class="header">
-    <div class="subtitle">Eineva Labs &bull; Autonomous Earth Observation Intelligence</div>
-    <h1>SiteSurveyor AI &mdash; Executive Site Intelligence Dossier</h1>
-    <div>Client: <strong>{client_name}</strong> | Property: {client_address}</div>
+    <div class="header-inner">
+      <div class="header-brand">
+        <div class="brand-mark">
+          <img src="{logo_data_uri}" alt="SiteSurveyor Logo" class="brand-logo" />
+        </div>
+        <div>
+          <div class="subtitle">An Eineva Labs product &bull; Autonomous Earth Observation Intelligence</div>
+          <h1>SiteSurveyor AI <span class="header-badge">Executive Dossier</span></h1>
+        </div>
+      </div>
+      <div class="header-client">
+        <div>Client: <strong>{client_name}</strong></div>
+        <div>Property: <strong>{client_address}</strong></div>
+      </div>
+    </div>
   </div>
 
   <div class="meta-bar">
-    <div class="meta-item"><strong>GPS Latitude:</strong> {latitude_label}</div>
-    <div class="meta-item"><strong>GPS Longitude:</strong> {longitude_label}</div>
-    <div class="meta-item"><strong>Datum / CRS:</strong> WGS 84 / UTM Zone {zone_label} (EPSG:{cfg.EPSG})</div>
-    <div class="meta-item"><strong>Resolution:</strong> 30-metre synchronized satellite grid</div>
-    <div class="meta-item"><strong>Generated:</strong> {dossier.get('generated_at')}</div>
+    <div class="meta-item"><strong>GPS Latitude:</strong> <span>{latitude_label}</span></div>
+    <div class="meta-item"><strong>GPS Longitude:</strong> <span>{longitude_label}</span></div>
+    <div class="meta-item"><strong>Datum / CRS:</strong> <span>WGS 84 / UTM {zone_label} (EPSG:{cfg.EPSG})</span></div>
+    <div class="meta-item"><strong>Resolution:</strong> <span>30m Multi-Sensor Grid</span></div>
+    <div class="meta-item"><strong>Generated:</strong> <span>{dossier.get('generated_at')}</span></div>
   </div>
 
   <div class="container">
@@ -485,39 +657,39 @@ def _build_html_report(dossier: dict) -> str:
     <div class="scorecard-grid">
 
       <!-- Groundwater -->
-      <div class="card">
+      <div class="card card--water">
         <h3>Groundwater Potential</h3>
         <div class="big-score" style="color: {score_color(gw.get('cell_score'))};">{gw.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(gw.get('cell_score'))};">{gw.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> {gw.get('parcel_150m_score', 'N/A')}/100 ({gw.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Top Drilling Site:</strong> {cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{gw.get('parcel_150m_score', 'N/A')}/100</span> ({gw.get('parcel_150m_class', 'N/A')})</div>
+        <div class="detail-line"><strong>Top Drilling Site:</strong> <span class="mono">{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</span> away</div>
       </div>
 
       <!-- Minerals -->
-      <div class="card">
+      <div class="card card--mineral">
         <h3>Mineral Prospectivity</h3>
         <div class="big-score" style="color: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(minerals.get('cell_score'))};">{minerals.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> {minerals.get('parcel_150m_score', 'N/A')}/100 ({minerals.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Nearest Target:</strong> {cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{minerals.get('parcel_150m_score', 'N/A')}/100</span> ({minerals.get('parcel_150m_class', 'N/A')})</div>
+        <div class="detail-line"><strong>Nearest Target:</strong> <span class="mono">{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</span> away</div>
       </div>
 
       <!-- Soil & Land -->
-      <div class="card">
+      <div class="card card--soil">
         <h3>Land & Soil Capability</h3>
         <div class="big-score" style="color: {score_color(soil.get('cell_score'))};">{soil.get('cell_score', 'N/A')}</div>
         <span class="score-badge" style="background: {score_color(soil.get('cell_score'))};">{soil.get('cell_class', 'Unknown')}</span>
-        <div class="detail-line"><strong>150m Parcel Mean:</strong> {soil.get('parcel_150m_score', 'N/A')}/100 ({soil.get('parcel_150m_class', 'N/A')})</div>
-        <div class="detail-line"><strong>Prime Land Zone:</strong> {cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>150m Parcel Mean:</strong> <span class="mono">{soil.get('parcel_150m_score', 'N/A')}/100</span> ({soil.get('parcel_150m_class', 'N/A')})</div>
+        <div class="detail-line"><strong>Prime Land Zone:</strong> <span class="mono">{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</span> away</div>
       </div>
 
       <!-- Hazard & Risk -->
-      <div class="card">
+      <div class="card card--hazard">
         <h3>Site Safety Index</h3>
         <div class="big-score" style="color: {score_color(haz.get('safety_score'))};">{haz.get('safety_score', 'N/A')}</div>
         <span class="score-badge" style="background: {hazard_color(haz.get('hazard_score'))};">Hazard: {haz.get('hazard_score', 'N/A')}/100</span>
         <div class="detail-line"><strong>Classification:</strong> {haz.get('hazard_class', 'N/A')}</div>
-        <div class="detail-line"><strong>Safest Building Site:</strong> {cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km away</div>
+        <div class="detail-line"><strong>Safest Building Site:</strong> <span class="mono">{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</span> away</div>
       </div>
 
     </div>
@@ -538,39 +710,39 @@ def _build_html_report(dossier: dict) -> str:
       </thead>
       <tbody>
         <tr>
-          <td><strong>Groundwater Siting</strong></td>
-          <td>#1 Candidate</td>
-          <td>{cand(gw, 'primary_borehole_candidate').get('latitude', 'N/A')}</td>
-          <td>{cand(gw, 'primary_borehole_candidate').get('longitude', 'N/A')}</td>
-          <td>{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</td>
-          <td><strong>{cand(gw, 'primary_borehole_candidate').get('potential_score', 'N/A')}/100</strong></td>
+          <td><strong style="color:var(--water);">Groundwater Siting</strong></td>
+          <td><span class="mono">#1 Candidate</span></td>
+          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('latitude', 'N/A')}</td>
+          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('longitude', 'N/A')}</td>
+          <td class="mono">{cand(gw, 'primary_borehole_candidate').get('distance_km', 'N/A')} km</td>
+          <td><strong class="mono">{cand(gw, 'primary_borehole_candidate').get('potential_score', 'N/A')}/100</strong></td>
           <td>Vertical Electrical Sounding (VES) resistivity verification</td>
         </tr>
         <tr>
-          <td><strong>Mineral Exploration</strong></td>
-          <td>#1 Target</td>
-          <td>{cand(minerals, 'primary_mineral_target').get('latitude', 'N/A')}</td>
-          <td>{cand(minerals, 'primary_mineral_target').get('longitude', 'N/A')}</td>
-          <td>{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</td>
-          <td><strong>{cand(minerals, 'primary_mineral_target').get('prospectivity_score', 'N/A')}/100</strong></td>
+          <td><strong style="color:var(--mineral);">Mineral Exploration</strong></td>
+          <td><span class="mono">#1 Target</span></td>
+          <td class="mono">{cand(minerals, 'primary_mineral_target').get('latitude', 'N/A')}</td>
+          <td class="mono">{cand(minerals, 'primary_mineral_target').get('longitude', 'N/A')}</td>
+          <td class="mono">{cand(minerals, 'primary_mineral_target').get('distance_km', 'N/A')} km</td>
+          <td><strong class="mono">{cand(minerals, 'primary_mineral_target').get('prospectivity_score', 'N/A')}/100</strong></td>
           <td>Ground geological mapping & soil geochemical sampling</td>
         </tr>
         <tr>
-          <td><strong>Soil & Agriculture</strong></td>
-          <td>#1 Zone</td>
-          <td>{cand(soil, 'primary_agricultural_zone').get('latitude', 'N/A')}</td>
-          <td>{cand(soil, 'primary_agricultural_zone').get('longitude', 'N/A')}</td>
-          <td>{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</td>
-          <td><strong>{cand(soil, 'primary_agricultural_zone').get('capability_score', 'N/A')}/100</strong></td>
+          <td><strong style="color:var(--soil);">Soil & Agriculture</strong></td>
+          <td><span class="mono">#1 Zone</span></td>
+          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('latitude', 'N/A')}</td>
+          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('longitude', 'N/A')}</td>
+          <td class="mono">{cand(soil, 'primary_agricultural_zone').get('distance_km', 'N/A')} km</td>
+          <td><strong class="mono">{cand(soil, 'primary_agricultural_zone').get('capability_score', 'N/A')}/100</strong></td>
           <td>Agronomic soil profile test & pH analysis</td>
         </tr>
         <tr>
-          <td><strong>Safest Building Site</strong></td>
-          <td>#1 Safe Zone</td>
-          <td>{cand(haz, 'primary_safe_build_site').get('latitude', 'N/A')}</td>
-          <td>{cand(haz, 'primary_safe_build_site').get('longitude', 'N/A')}</td>
-          <td>{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</td>
-          <td><strong>{cand(haz, 'primary_safe_build_site').get('safety_score', 'N/A')}/100</strong></td>
+          <td><strong style="color:var(--hazard);">Safest Building Site</strong></td>
+          <td><span class="mono">#1 Safe Zone</span></td>
+          <td class="mono">{cand(haz, 'primary_safe_build_site').get('latitude', 'N/A')}</td>
+          <td class="mono">{cand(haz, 'primary_safe_build_site').get('longitude', 'N/A')}</td>
+          <td class="mono">{cand(haz, 'primary_safe_build_site').get('distance_km', 'N/A')} km</td>
+          <td><strong class="mono">{cand(haz, 'primary_safe_build_site').get('safety_score', 'N/A')}/100</strong></td>
           <td>Geotechnical soil compaction & foundation investigation</td>
         </tr>
       </tbody>
@@ -605,7 +777,7 @@ def _build_html_report(dossier: dict) -> str:
   </div>
 
   <div class="footer">
-    SiteSurveyor AI v2.0 &bull; Produced by <strong>{cfg.ANALYST}</strong> for <strong>{client_name}</strong> &bull; All Rights Reserved.
+    SiteSurveyor AI &bull; Produced by <strong>{cfg.ANALYST}</strong> for <strong>{client_name}</strong> &bull; An Eineva Labs product &bull; All Rights Reserved.
   </div>
 
 </body>
