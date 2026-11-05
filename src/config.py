@@ -25,10 +25,18 @@ load_dotenv()
 
 # --- Paths ---
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data"
+
+# Render's container filesystem is ephemeral: anything written under /app is discarded on
+# every deploy and restart, which took the deliverable maps, the KMZ files and the
+# executive report with it. SITESURVEYOR_STATE_DIR points the survey cache and the
+# published outputs at a mounted disk instead. Unset, it is the repository root, so local
+# runs and the test suite keep working exactly as before.
+_state_override = os.getenv("SITESURVEYOR_STATE_DIR", "").strip()
+STATE_DIR = Path(_state_override).expanduser() if _state_override else ROOT
+DATA_DIR = STATE_DIR / "data"
 RAW_BASE = DATA_DIR / "raw"
 EXTERNAL = DATA_DIR / "external"
-OUT = ROOT / "outputs"
+OUT = STATE_DIR / "outputs"
 for d in (RAW_BASE, EXTERNAL, OUT):
     d.mkdir(parents=True, exist_ok=True)
 
@@ -121,8 +129,11 @@ TARGET_X: float = 0.0
 TARGET_Y: float = 0.0
 TARGET_COL: int = 0
 TARGET_ROW: int = 0
-CLIENT: str = "Thomas Mangena"
-CLIENT_ADDRESS: str = "05 Sekope Highlands, Gweru, Zimbabwe"
+# Neutral defaults on purpose: a real person's name and street address used to be baked
+# into these and published on the public dossier of every instance, including installs
+# that never ran a survey of that property.
+CLIENT: str = "Site Survey"
+CLIENT_ADDRESS: str = "Property location not specified"
 RAW: Path = RAW_BASE
 AOI_SLUG: str = ""
 

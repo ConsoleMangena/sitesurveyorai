@@ -4,7 +4,7 @@ SiteSurveyor AI — Model Context Protocol (MCP) Server
 Autonomous satellite-derived geospatial intelligence server for AI agents.
 Enables agents (Claude, Gemini, Cursor, ChatGPT, etc.) to trigger multi-criteria
 satellite screening for any GPS coordinate across:
-  - Category 1: Groundwater potential & precision borehole siting
+  - Category 1: Groundwater potential & prioritised borehole siting
   - Category 2: Shear-zone gold prospectivity & hydrothermal alteration
   - Category 3: Soil & agricultural capability, erosion risk
   - Category 5: Multi-hazard & site safety screening
@@ -45,6 +45,26 @@ mcp = MCPServer(
     ),
     version="2.0.0",
 )
+
+
+# The category candidate lists live in the dossier; surfacing them from the survey tool
+# is what lets a client render the ranked sites instead of re-reading the JSON file.
+_CANDIDATE_KEYS = {
+    "water": "candidate_sites",
+    "minerals": "candidate_targets",
+    "soil_land": "candidate_areas",
+    "hazard_safety": "safest_candidate_sites",
+}
+
+
+def _candidate_lists(dossier: dict, limit: int = 6) -> dict[str, list]:
+    categories = dossier.get("categories", {}) if isinstance(dossier, dict) else {}
+    out: dict[str, list] = {}
+    for category, key in _CANDIDATE_KEYS.items():
+        data = categories.get(category) or {}
+        candidates = data.get(key) or []
+        out[category] = candidates[:limit]
+    return out
 
 
 def _ensure_data_present(required: list[str] | None = None):
@@ -95,7 +115,32 @@ def _cached_summary(path: Path, latitude: float, longitude: float) -> dict | Non
 # MCP Tools
 # ============================================================================
 
-_SITE_LOCK = threading.Lock()
+# Reentrant: the REST layer configures the AOI and then calls the tool, so the same
+# thread takes this lock twice. A plain Lock deadlocked the second acquisition.
+_SITE_LOCK = threading.RLock()
+
+_progress_state = threading.local()
+
+
+def set_progress_callback(callback) -> None:
+    """Register a per-thread stage reporter, or None to clear it.
+
+    Thread-local so a background job's progress cannot leak into a stdio MCP session
+    sharing the process, and optional so every existing caller is unaffected.
+    """
+    _progress_state.callback = callback
+
+
+def _report_progress(stage: str, percent: int) -> None:
+    callback = getattr(_progress_state, "callback", None)
+    if callback is None:
+        return
+    try:
+        callback(stage, percent)
+    except Exception:
+        # A progress reporter is observability, not analysis: it must never be able to
+        # fail a survey that is otherwise running correctly.
+        pass
 
 
 def _single_site(fn):
@@ -121,6 +166,7 @@ def survey_site(
     longitude: float,
     categories: list[str] = ["all"],
     client_name: str = "Client",
+    address: str = "",
 ) -> dict:
     """
     Execute a comprehensive satellite screening survey across requested categories.
@@ -130,36 +176,49 @@ def survey_site(
         longitude: Target property GPS longitude in decimal degrees (e.g. 29.84598)
         categories: List of categories to analyze: 'water', 'minerals', 'soil', 'hazard', or 'all'.
         client_name: Name of client or project for report attribution.
+        address: Property address or location description printed on the dossier.
 
     Returns:
-        Structured intelligence dictionary with multi-criteria scores, primary GPS recommendations,
-        and paths to maps, KMZ vectors, and the executive HTML dossier.
+        Structured intelligence dictionary with multi-criteria scores, ranked candidate
+        lists, primary GPS recommendations, and paths to maps, KMZ vectors, and the
+        executive HTML dossier.
     """
-    cfg.set_target_site(latitude, longitude, client=client_name)
+    cfg.set_target_site(latitude, longitude, client=client_name, address=address or None)
+    _report_progress("Acquiring satellite layers", 6)
     _ensure_data_present()
 
     cats = [c.lower().strip() for c in categories]
     run_all = "all" in cats
+    _report_progress("Running survey categories", 15)
 
     results = {}
-    if run_all or "water" in cats:
-        from src.engines.water import run_water_survey
-        results["water"] = run_water_survey()
-        gc.collect()
-    if run_all or "minerals" in cats:
-        from src.engines.minerals import run_minerals_survey
-        results["minerals"] = run_minerals_survey()
-        gc.collect()
-    if run_all or "soil" in cats:
-        from src.engines.soil import run_soil_survey
-        results["soil"] = run_soil_survey()
-        gc.collect()
-    if run_all or "hazard" in cats:
-        from src.engines.hazard import run_hazard_survey
-        results["hazard"] = run_hazard_survey()
+    stages = [
+        ("water", "Groundwater potential & borehole siting", 20, 45),
+        ("minerals", "Mineral prospectivity & structure", 45, 62),
+        ("soil", "Soil capability & erosion risk", 62, 78),
+        ("hazard", "Hazard exposure & safe siting", 78, 90),
+    ]
+    for key, label, start_pct, end_pct in stages:
+        if not (run_all or key in cats):
+            continue
+        _report_progress(label, start_pct)
+        if key == "water":
+            from src.engines.water import run_water_survey
+            results["water"] = run_water_survey()
+        elif key == "minerals":
+            from src.engines.minerals import run_minerals_survey
+            results["minerals"] = run_minerals_survey()
+        elif key == "soil":
+            from src.engines.soil import run_soil_survey
+            results["soil"] = run_soil_survey()
+        elif key == "hazard":
+            from src.engines.hazard import run_hazard_survey
+            results["hazard"] = run_hazard_survey()
+        _report_progress(label, end_pct)
         gc.collect()
 
     # Generate or refresh Master Executive Dossier
+    _report_progress("Building executive dossier", 92)
     from src.report import generate_site_dossier
     dossier = generate_site_dossier()
     scorecard = dossier.get("executive_scorecard", {})
@@ -201,12 +260,20 @@ def survey_site(
                 "hazard_class": haz.get("hazard_class"),
             },
         },
+        "candidates": _candidate_lists(dossier),
         "primary_recommendations": {
             "top_borehole_drilling_site": gw.get("primary_borehole_candidate"),
             "top_mineral_exploration_target": minerals.get("primary_mineral_target"),
             "top_agricultural_zone": soil.get("primary_agricultural_zone"),
             "safest_building_site": haz.get("primary_safe_build_site"),
         },
+        # A caller must be able to tell whether a 61.4 is comparable to another site's
+        # 61.4. It is not: the index is a percentile rank inside this AOI only.
+        "score_basis": "relative_to_aoi_percentile",
+        "claim_ceiling": (
+            "Prioritisation of investigation sites only. Not a statement of water yield, "
+            "mineral grade, or buildability. Ground truthing is required before capital spend."
+        ),
         "deliverables": {
             "executive_html_dossier": str(cfg.OUT / "SiteSurveyor_Intelligence_Report.html"),
             "master_json_dossier": str(cfg.OUT / "master_site_dossier.json"),
@@ -230,7 +297,10 @@ def survey_site(
 @_single_site
 def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
     """
-    Retrieve ranked precision borehole drilling coordinates for a given location.
+    Retrieve ranked borehole investigation coordinates for a given location.
+
+    These are prioritisation targets from a 30 m satellite screening grid, not survey-grade
+    drill positions: the output states its own uncertainty and expects VES/ERT confirmation.
 
     Args:
         latitude: Target property GPS latitude in decimal degrees.

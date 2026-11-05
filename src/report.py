@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from html import escape as _escape
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -199,6 +200,31 @@ def _build_html_report(dossier: dict) -> str:
     soil = sc.get("soil_land", {})
     haz = sc.get("hazard_safety", {})
 
+    # Client, address and coordinates are caller-supplied and this document is served
+    # same-origin, so they are escaped before interpolation. Unescaped, a client name
+    # containing a script tag executed for the next visitor of /api/report.
+    client_name = _escape(cfg.CLIENT or "Client")
+    client_address = _escape(cfg.CLIENT_ADDRESS or "")
+    latitude_label = f"{abs(cfg.TARGET_LAT):.5f}&deg; {'N' if cfg.TARGET_LAT >= 0 else 'S'}"
+    longitude_label = f"{abs(cfg.TARGET_LON):.5f}&deg; {'E' if cfg.TARGET_LON >= 0 else 'W'}"
+    zone_label = f"{cfg.UTM_ZONE}{'N' if cfg.TARGET_LAT >= 0 else 'S'}"
+
+    statuses = dossier.get("category_status", {}) or {}
+    unfinished = [name.replace("_", " ") for name, status in statuses.items() if status != "loaded"]
+    if not statuses:
+        status_banner = (
+            '<div class="status-banner"><strong>No survey has been run yet.</strong> '
+            'Every score below reads N/A because no category output exists for this AOI.</div>'
+        )
+    elif unfinished:
+        status_banner = (
+            '<div class="status-banner"><strong>Incomplete dossier.</strong> '
+            f'No usable output for: {_escape(", ".join(unfinished))}. '
+            'Those scores read N/A and their maps are omitted rather than drawn from missing data.</div>'
+        )
+    else:
+        status_banner = ""
+
     # Convert map images to base64 for complete offline portability.
     # A panel that cannot be embedded is stated as unavailable with its reason --
     # a silently missing map reads as "no map was made" to the client.
@@ -385,6 +411,31 @@ def _build_html_report(dossier: dict) -> str:
       border-radius: 4px;
       border: 1px solid #e1e8ed;
     }}
+    .status-banner {{
+      background: #fff4e5;
+      border-left: 4px solid #f49d37;
+      border-radius: 4px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #7a4b10;
+      margin-bottom: 25px;
+    }}
+    .note {{
+      font-size: 12px;
+      color: #52616f;
+      background: #eef4f7;
+      border-radius: 4px;
+      padding: 10px 14px;
+      margin: -4px 0 18px 0;
+    }}
+    .attribution {{
+      font-size: 11px;
+      color: #5b6b7a;
+      line-height: 1.55;
+      border-top: 1px solid #e1e8ed;
+      padding-top: 16px;
+      margin: 25px 0 0 0;
+    }}
     .disclaimer {{
       background: #fff8e6;
       border-left: 4px solid #f49d37;
@@ -409,21 +460,28 @@ def _build_html_report(dossier: dict) -> str:
   <div class="header">
     <div class="subtitle">Eineva Labs &bull; Autonomous Earth Observation Intelligence</div>
     <h1>SiteSurveyor AI &mdash; Executive Site Intelligence Dossier</h1>
-    <div>Client: <strong>{cfg.CLIENT}</strong> | Property: {cfg.CLIENT_ADDRESS}</div>
+    <div>Client: <strong>{client_name}</strong> | Property: {client_address}</div>
   </div>
 
   <div class="meta-bar">
-    <div class="meta-item"><strong>GPS Latitude:</strong> {cfg.TARGET_LAT:.5f}&deg; S</div>
-    <div class="meta-item"><strong>GPS Longitude:</strong> {cfg.TARGET_LON:.5f}&deg; E</div>
-    <div class="meta-item"><strong>Datum / CRS:</strong> WGS 84 / UTM Zone {cfg.UTM_ZONE} (EPSG:{cfg.EPSG})</div>
+    <div class="meta-item"><strong>GPS Latitude:</strong> {latitude_label}</div>
+    <div class="meta-item"><strong>GPS Longitude:</strong> {longitude_label}</div>
+    <div class="meta-item"><strong>Datum / CRS:</strong> WGS 84 / UTM Zone {zone_label} (EPSG:{cfg.EPSG})</div>
     <div class="meta-item"><strong>Resolution:</strong> 30-metre synchronized satellite grid</div>
     <div class="meta-item"><strong>Generated:</strong> {dossier.get('generated_at')}</div>
   </div>
 
   <div class="container">
 
+    {status_banner}
+
     <!-- Executive Multi-Criteria Scorecard -->
     <div class="section-title">1. Multi-Criteria Site Scorecard (Target Property)</div>
+    <div class="note">
+      <strong>How to read these numbers:</strong> each score is a percentile rank within this
+      survey area, not an absolute measurement. A 60 means the target cell ranks above 60% of
+      the surrounding AOI; two separate surveys are not comparable with each other.
+    </div>
     <div class="scorecard-grid">
 
       <!-- Groundwater -->
@@ -465,7 +523,7 @@ def _build_html_report(dossier: dict) -> str:
     </div>
 
     <!-- Actionable GPS Recommendations Table -->
-    <div class="section-title">2. Actionable Precision Field Coordinates (Top Ranked per Category)</div>
+    <div class="section-title">2. Prioritised Field Verification Coordinates (Top Ranked per Category)</div>
     <table class="target-table">
       <thead>
         <tr>
@@ -524,6 +582,15 @@ def _build_html_report(dossier: dict) -> str:
       {maps_html}
     </div>
 
+    <!-- Data attribution -->
+    <div class="attribution">
+      <strong>Data attribution:</strong> Copernicus Sentinel-2 and Copernicus DEM 30m via
+      Digital Earth Africa (CC BY 4.0); ESA WorldCover (CC BY 4.0); JAXA ALOS PALSAR mosaic
+      (&copy; JAXA/METI); Landsat imagery courtesy of USGS/NASA; CHIRPS precipitation courtesy
+      of the Climate Hazards Center, UC Santa Barbara. Screening output produced by
+      SiteSurveyor AI &mdash; Eineva Labs.
+    </div>
+
     <!-- Regulatory / Engineering Disclaimer -->
     <div class="disclaimer">
       <strong>SCREENING-LEVEL INTELLIGENCE DISCLAIMER:</strong><br/>
@@ -538,7 +605,7 @@ def _build_html_report(dossier: dict) -> str:
   </div>
 
   <div class="footer">
-    SiteSurveyor AI v2.0 &bull; Produced by <strong>{cfg.ANALYST}</strong> for <strong>{cfg.CLIENT}</strong> &bull; All Rights Reserved.
+    SiteSurveyor AI v2.0 &bull; Produced by <strong>{cfg.ANALYST}</strong> for <strong>{client_name}</strong> &bull; All Rights Reserved.
   </div>
 
 </body>

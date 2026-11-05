@@ -9,7 +9,17 @@ services:
     plan: starter
     healthCheckPath: /health
     autoDeploy: true
+    # A container filesystem is discarded on every deploy and restart. Without a disk the
+    # survey cache and every deliverable under /outputs is gone after each release, so the
+    # map and KMZ links in the UI return 404 and each survey re-downloads its layers.
+    # One disk per service is the platform limit, so both live under this single mount.
+    disk:
+      name: sitesurveyor-state
+      mountPath: /app/state
+      sizeGB: 1
     envVars:
+      - key: SITESURVEYOR_STATE_DIR
+        value: /app/state
       # No PORT here on purpose: Render assigns the container port and overrides a
       # pinned value, which would leave uvicorn listening somewhere the router never reaches.
       - key: GDAL_DISABLE_READDIR_ON_OPEN

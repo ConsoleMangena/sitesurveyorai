@@ -6,7 +6,7 @@
         "-m",
         "src.mcp_server"
       ],
-      "cwd": "c:\\Users\\THINKPAD\\Documents\\SiteSurveyorAI",
+      "cwd": ".",
       "env": {
         "PYTHONUNBUFFERED": "1"
       }

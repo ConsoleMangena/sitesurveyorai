@@ -2,7 +2,7 @@
 SiteSurveyor AI — Groundwater Potential Engine (Category 1: WATER)
 ==================================================================
 Multi-criteria decision analysis (AHP) for groundwater potential zoning
-and precision borehole siting around target site (Gweru, Zimbabwe).
+and prioritised borehole siting around target site (Gweru, Zimbabwe).
 
 Evidence layers:
   1. Lineament density (SAR L-band HV + DEM hillshade) : 0.26

@@ -12,6 +12,9 @@ FROM python:3.14-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# Survey cache + published deliverables. Point this at a mounted disk in production; on a
+# plain `docker run` it simply lives inside the container and is lost with it.
+ENV SITESURVEYOR_STATE_DIR=/app/state
 # Coverages are read as remote COGs; without this GDAL lists the whole S3 prefix
 # on every open, which turns each layer read into a multi-second stall.
 # PORT is deliberately not set here — the platform injects it at runtime.
@@ -44,7 +47,7 @@ COPY src/ ./src/
 COPY main.py .
 
 # Create persistent cache & outputs directories
-RUN mkdir -p /app/data/raw /app/outputs
+RUN mkdir -p /app/state/data/raw /app/state/data/external /app/state/outputs
 
 # Import the app once during the build. A missing shared library or module otherwise
 # surfaces only as a restarting instance and a 502, with the traceback buried in runtime

@@ -4,11 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SiteSurveyor AI — Digital Earth Africa Geospatial Sandbox</title>
-  
+  <meta name="description" content="Pick a coordinate in Africa and screen groundwater, mineral, soil and natural-hazard potential from Copernicus Sentinel-2, ALOS PALSAR, Landsat and CHIRPS satellite data.">
+  <meta name="theme-color" content="#0b4f6c">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="SiteSurveyor AI — Satellite Site Screening">
+  <meta property="og:description" content="Autonomous multi-criteria satellite screening for groundwater, minerals, soil capability and natural hazards.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b4f6c'/%3E%3Ccircle cx='32' cy='32' r='16' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23ffffff'/%3E%3C/svg%3E">
+
   <!-- Leaflet CSS & JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,7 +33,8 @@
       --bg-dark: #0f172a;
       --bg-card: #ffffff;
       --text-main: #1e293b;
-      --text-muted: #64748b;
+      --text-muted: #475569;
+      --text-subtle: #64748b;
       --border: #e2e8f0;
       --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
       --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
@@ -50,6 +57,23 @@
       overflow: hidden;
     }
 
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    :focus-visible {
+      outline: 3px solid #0284c7;
+      outline-offset: 2px;
+    }
+
     /* Header Bar */
     header {
       background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
@@ -58,8 +82,10 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 16px;
       box-shadow: var(--shadow-md);
       z-index: 1000;
+      flex-wrap: wrap;
     }
 
     .brand-group {
@@ -77,6 +103,7 @@
       border-radius: 8px;
       letter-spacing: 0.5px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      white-space: nowrap;
     }
 
     .title-box h1 {
@@ -87,7 +114,7 @@
 
     .title-box p {
       font-size: 11px;
-      opacity: 0.85;
+      opacity: 0.9;
       text-transform: uppercase;
       letter-spacing: 0.8px;
     }
@@ -95,7 +122,8 @@
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
+      flex-wrap: wrap;
     }
 
     .badge-status {
@@ -108,7 +136,7 @@
       border-radius: 20px;
       font-size: 11px;
       font-weight: 500;
-      color: #e2e8f0;
+      color: #f1f5f9;
     }
 
     .badge-status .dot {
@@ -140,6 +168,7 @@
       flex: 1;
       height: calc(100vh - 60px);
       position: relative;
+      min-height: 0;
     }
 
     /* Left Control & Intelligence Sidebar */
@@ -177,9 +206,9 @@
 
     .form-group label {
       display: block;
-      font-size: 11.5px;
+      font-size: 12px;
       font-weight: 600;
-      color: #475569;
+      color: var(--text-muted);
       margin-bottom: 5px;
     }
 
@@ -193,7 +222,7 @@
       width: 100%;
       padding: 8px 10px;
       font-size: 13px;
-      border: 1px solid var(--border);
+      border: 1px solid #cbd5e1;
       border-radius: 6px;
       background: #f8fafc;
       color: var(--text-main);
@@ -203,8 +232,15 @@
     .input-control:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(11, 79, 108, 0.15);
+      box-shadow: 0 0 0 3px rgba(11, 79, 108, 0.18);
       background: #ffffff;
+    }
+
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-subtle);
+      margin-top: 4px;
+      line-height: 1.4;
     }
 
     .category-pills {
@@ -215,18 +251,23 @@
     }
 
     .pill-checkbox {
-      display: none;
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
     }
 
     .pill-label {
+      display: inline-flex;
+      align-items: center;
       cursor: pointer;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
-      padding: 5px 10px;
+      padding: 6px 12px;
       border-radius: 16px;
-      border: 1px solid var(--border);
+      border: 1px solid #cbd5e1;
       background: #f1f5f9;
-      color: #475569;
+      color: var(--text-muted);
       transition: all 0.15s;
       user-select: none;
     }
@@ -235,6 +276,11 @@
       background: var(--primary);
       color: #ffffff;
       border-color: var(--primary);
+    }
+
+    .pill-checkbox:focus-visible + .pill-label {
+      outline: 3px solid #0284c7;
+      outline-offset: 2px;
     }
 
     .btn-submit {
@@ -265,7 +311,61 @@
 
     .btn-submit:disabled {
       background: #94a3b8;
-      cursor: not-allowed;
+      cursor: progress;
+    }
+
+    /* Progress + errors */
+    .progress {
+      margin-top: 12px;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #0284c7, #0b4f6c);
+      transition: width 0.4s ease;
+    }
+
+    .progress-stage {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    .error-region {
+      margin-top: 12px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-left: 4px solid #dc2626;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #7f1d1d;
+      line-height: 1.45;
+    }
+
+    .error-region strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 12.5px;
+    }
+
+    .error-region .error-hint {
+      color: #991b1b;
+      margin-top: 5px;
+      font-size: 11.5px;
+    }
+
+    .error-region .error-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: #b91c1c;
+      margin-top: 5px;
     }
 
     /* Scorecard Cards */
@@ -282,12 +382,6 @@
       border-radius: 8px;
       padding: 12px;
       border-left: 4px solid var(--primary);
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-
-    .score-card:hover {
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-sm);
     }
 
     .score-card.water { border-left-color: var(--accent-water); }
@@ -296,11 +390,11 @@
     .score-card.hazard { border-left-color: var(--accent-safety); }
 
     .card-title {
-      font-size: 10.5px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: #64748b;
+      color: var(--text-muted);
       margin-bottom: 6px;
     }
 
@@ -314,22 +408,35 @@
     .card-score span {
       font-size: 11px;
       font-weight: 500;
-      color: #94a3b8;
+      color: var(--text-subtle);
     }
 
     .card-badge {
       display: inline-block;
-      font-size: 10px;
+      font-size: 10.5px;
       font-weight: 700;
-      padding: 2px 6px;
+      padding: 2px 7px;
       border-radius: 10px;
       margin-top: 6px;
       text-transform: uppercase;
+      background: #e2e8f0;
+      color: #334155;
     }
 
     .badge-high { background: #dcfce7; color: #15803d; }
-    .badge-mod  { background: #fef9c3; color: #a16207; }
-    .badge-low  { background: #fee2e2; color: #b91c1c; }
+    .badge-mod  { background: #fef9c3; color: #854d0e; }
+    .badge-low  { background: #fee2e2; color: #991b1b; }
+    .badge-na   { background: #e2e8f0; color: #475569; }
+
+    .results-note {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      background: var(--primary-light);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      line-height: 1.45;
+    }
 
     /* Candidates List */
     .candidates-list {
@@ -344,6 +451,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      width: 100%;
+      text-align: left;
       background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -358,27 +467,43 @@
       background: var(--primary-light);
     }
 
+    .cand-empty {
+      font-size: 12px;
+      color: var(--text-subtle);
+      text-align: center;
+      padding: 18px 10px;
+      line-height: 1.5;
+    }
+
     .cand-rank {
       font-weight: 800;
       color: var(--primary);
-      width: 24px;
+      width: 28px;
+      flex: 0 0 auto;
     }
 
     .cand-info {
       flex: 1;
       padding: 0 8px;
+      min-width: 0;
+    }
+
+    .cand-name {
+      font-weight: 600;
+      font-size: 12px;
     }
 
     .cand-coords {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10.5px;
-      color: #475569;
+      font-size: 11px;
+      color: var(--text-muted);
     }
 
     .cand-score {
       font-weight: 700;
       font-size: 13px;
       color: var(--text-main);
+      white-space: nowrap;
     }
 
     /* Deliverables Bar */
@@ -393,15 +518,16 @@
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 8px 12px;
-      font-size: 11.5px;
+      padding: 9px 12px;
+      font-size: 12px;
       font-weight: 600;
       border-radius: 6px;
       text-decoration: none;
-      border: 1px solid var(--border);
+      border: 1px solid #cbd5e1;
       background: #f8fafc;
       color: #334155;
       transition: all 0.15s;
+      text-align: center;
     }
 
     .btn-action:hover {
@@ -421,11 +547,17 @@
       background: #0369a1;
     }
 
+    .btn-action.is-disabled,
+    .btn-action[aria-disabled="true"] {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
     /* Disclaimer */
     .disclaimer {
-      font-size: 10.5px;
-      color: #94a3b8;
-      line-height: 1.4;
+      font-size: 11px;
+      color: var(--text-subtle);
+      line-height: 1.45;
       padding: 12px 20px;
       background: #f8fafc;
       font-style: italic;
@@ -435,6 +567,7 @@
     #map {
       flex: 1;
       height: 100%;
+      min-height: 320px;
       background: #0f172a;
     }
 
@@ -443,7 +576,7 @@
       position: absolute;
       top: 14px;
       right: 14px;
-      background: rgba(15, 23, 42, 0.85);
+      background: rgba(15, 23, 42, 0.9);
       backdrop-filter: blur(8px);
       color: #ffffff;
       border: 1px solid rgba(255, 255, 255, 0.2);
@@ -453,8 +586,9 @@
       z-index: 1000;
       box-shadow: var(--shadow-md);
       display: flex;
-      align-items: center;
-      gap: 12px;
+      flex-direction: column;
+      gap: 3px;
+      max-width: min(420px, 60vw);
     }
 
     .map-banner strong {
@@ -469,11 +603,58 @@
       width: 14px;
       height: 14px;
       animation: spin 0.8s linear infinite;
+      flex: 0 0 auto;
     }
 
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation-duration: 3s; }
+      .progress-bar { transition: none; }
+    }
+
+    /* Small screens: the sidebar used to be a fixed 440px column beside a map, which
+       left no usable map and clipped the form on any phone. */
+    @media (max-width: 900px) {
+      body {
+        height: auto;
+        overflow: auto;
+      }
+      header {
+        padding: 10px 14px;
+      }
+      .title-box p { display: none; }
+      .app-body {
+        flex-direction: column;
+        height: auto;
+      }
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        overflow: visible;
+      }
+      #map {
+        height: 62vh;
+        min-height: 340px;
+        flex: none;
+      }
+      .map-banner {
+        position: static;
+        margin: 10px 14px 0;
+        max-width: none;
+        transform: none;
+      }
+      .app-body { position: static; }
+    }
+
+    @media (max-width: 420px) {
+      .form-row { grid-template-columns: 1fr; }
+      .actions-grid { grid-template-columns: 1fr; }
+      .btn-action.featured { grid-column: auto; }
     }
   </style>
 </head>
@@ -485,98 +666,118 @@
       <div class="logo-badge">SITESURVEYOR AI</div>
       <div class="title-box">
         <h1>Digital Earth Africa Sandbox</h1>
-        <p>Screening-Level Earth Observation & Geospatial Intelligence • Eineva Labs</p>
+        <p>Screening-Level Earth Observation &amp; Geospatial Intelligence &bull; Eineva Labs</p>
       </div>
     </div>
     <div class="header-actions">
       <div class="badge-status">
-        <div class="dot"></div>
-        <span>DE Africa Sandbox Token Active (WCS 2.1.0)</span>
+        <div class="dot" aria-hidden="true"></div>
+        <span>DE Africa WCS 2.1.0 &bull; 30 m grid</span>
       </div>
-      <a href="/docs" target="_blank" class="nav-btn">FastAPI Docs</a>
-      <a href="/api/report" target="_blank" class="nav-btn" style="background:#0284c7;">View HTML Dossier</a>
+      <a href="/docs" target="_blank" rel="noopener" class="nav-btn">API Docs</a>
+      <a href="/api/report" target="_blank" rel="noopener" class="nav-btn" style="background:#0284c7;">View HTML Dossier</a>
     </div>
   </header>
 
   <!-- Main View -->
   <div class="app-body">
-    
+
     <!-- Sidebar Control Panel -->
     <div class="sidebar">
-      
+
       <!-- Coordinate Picker & Configuration -->
-      <div class="panel-section">
+      <form class="panel-section" id="survey-form" novalidate>
         <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-          Target AOI & Siting Parameters
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          Target AOI &amp; Siting Parameters
         </div>
-        
+
         <div class="form-row">
           <div class="form-group">
-            <label>Latitude (°)</label>
-            <input type="number" step="0.00001" id="lat" class="input-control" value="-19.50487">
+            <label for="lat">Latitude (°)</label>
+            <input type="number" step="0.00001" min="-90" max="90" inputmode="decimal" id="lat" class="input-control" value="-19.50487">
           </div>
           <div class="form-group">
-            <label>Longitude (°)</label>
-            <input type="number" step="0.00001" id="lon" class="input-control" value="29.84598">
+            <label for="lon">Longitude (°)</label>
+            <input type="number" step="0.00001" min="-180" max="180" inputmode="decimal" id="lon" class="input-control" value="29.84598">
           </div>
         </div>
 
         <div class="form-group">
-          <label>Client / Property Name</label>
-          <input type="text" id="client" class="input-control" value="Thomas Mangena">
+          <label for="client">Client / Property Name</label>
+          <input type="text" id="client" class="input-control" maxlength="120" autocomplete="off" value="Site Survey">
         </div>
 
         <div class="form-group">
-          <label>Location / Address Description</label>
-          <input type="text" id="address" class="input-control" value="05 Sekope Highlands, Gweru, Zimbabwe">
+          <label for="address">Location / Address Description</label>
+          <input type="text" id="address" class="input-control" maxlength="240" autocomplete="off" value="Property location not specified">
         </div>
 
         <div class="form-group">
-          <label>Survey Categories</label>
+          <label for="half-deg">Survey radius (half-width)</label>
+          <select id="half-deg" class="input-control">
+            <option value="0.045">≈ 5 km — single plot</option>
+            <option value="0.12" selected>≈ 13 km — farm / claim (default)</option>
+            <option value="0.23">≈ 25 km — district</option>
+            <option value="0.45">≈ 50 km — regional (slow)</option>
+          </select>
+          <p class="field-hint">Every layer is analysed on a 30 m grid inside this box. Larger boxes download more imagery and take longer.</p>
+        </div>
+
+        <fieldset class="form-group" style="border:0;">
+          <legend class="field-hint" style="font-weight:600; color:var(--text-muted); font-size:12px; margin-bottom:6px;">Survey categories</legend>
           <div class="category-pills">
             <label><input type="checkbox" id="cat-water" class="pill-checkbox" checked><span class="pill-label">Water</span></label>
             <label><input type="checkbox" id="cat-minerals" class="pill-checkbox" checked><span class="pill-label">Minerals</span></label>
             <label><input type="checkbox" id="cat-soil" class="pill-checkbox" checked><span class="pill-label">Soil</span></label>
             <label><input type="checkbox" id="cat-hazard" class="pill-checkbox" checked><span class="pill-label">Hazard</span></label>
           </div>
-        </div>
+        </fieldset>
 
-        <button id="btn-run" class="btn-submit" onclick="executeSurvey()">
+        <button type="submit" id="btn-run" class="btn-submit">
           <span id="btn-text">Execute Screening Survey</span>
         </button>
-      </div>
+
+        <div class="progress" id="progress" role="progressbar" aria-labelledby="progress-stage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <p class="progress-stage" id="progress-stage" role="status" aria-live="polite"></p>
+
+        <div class="error-region" id="error-region" role="alert" hidden></div>
+      </form>
 
       <!-- Live Executive Scorecard -->
       <div class="panel-section">
         <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           Executive Target Scorecard
         </div>
 
-        <div class="scorecard-grid">
+        <p class="results-note" id="results-note">No survey has run in this session. Scores appear here when a survey finishes.</p>
+
+        <div class="scorecard-grid" id="scorecard" aria-live="polite">
           <div class="score-card water">
             <div class="card-title">Groundwater</div>
-            <div class="card-score" id="score-water">58.0 <span>/100</span></div>
-            <span class="card-badge badge-mod" id="badge-water">Moderate</span>
+            <div class="card-score" id="score-water">—</div>
+            <span class="card-badge badge-na" id="badge-water">Not run</span>
           </div>
 
           <div class="score-card minerals">
             <div class="card-title">Minerals</div>
-            <div class="card-score" id="score-minerals">42.0 <span>/100</span></div>
-            <span class="card-badge badge-low" id="badge-minerals">Low</span>
+            <div class="card-score" id="score-minerals">—</div>
+            <span class="card-badge badge-na" id="badge-minerals">Not run</span>
           </div>
 
           <div class="score-card soil">
             <div class="card-title">Soil Capability</div>
-            <div class="card-score" id="score-soil">58.5 <span>/100</span></div>
-            <span class="card-badge badge-mod" id="badge-soil">Moderate</span>
+            <div class="card-score" id="score-soil">—</div>
+            <span class="card-badge badge-na" id="badge-soil">Not run</span>
           </div>
 
           <div class="score-card hazard">
             <div class="card-title">Site Safety</div>
-            <div class="card-score" id="score-safety">55.6 <span>/100</span></div>
-            <span class="card-badge badge-mod" id="badge-safety">Moderate</span>
+            <div class="card-score" id="score-safety">—</div>
+            <span class="card-badge badge-na" id="badge-safety">Not run</span>
           </div>
         </div>
       </div>
@@ -584,292 +785,622 @@
       <!-- Actionable Candidate Sites -->
       <div class="panel-section" style="flex:1;">
         <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
           Ranked Siting Candidates
         </div>
 
-        <div class="candidates-list" id="candidates-container">
-          <div style="font-size: 11.5px; color: #94a3b8; text-align: center; padding: 20px;">
-            Click on map or hit "Execute Screening Survey" to rank candidate drill sites and agricultural zones.
-          </div>
+        <div class="candidates-list" id="candidates-container" role="list">
+          <p class="cand-empty">Click the map or run a survey to rank candidate drilling sites and land zones.</p>
         </div>
       </div>
 
       <!-- Deliverables & Exports -->
       <div class="panel-section">
         <div class="section-heading">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export Deliverables
         </div>
         <div class="actions-grid">
-          <a href="/api/report" target="_blank" class="btn-action featured">
-            <span>📄 Standalone HTML Dossier (18MB Self-Contained)</span>
+          <a href="/api/report" target="_blank" rel="noopener" class="btn-action featured" data-deliverable="html_report">
+            <span>Executive HTML Dossier</span>
           </a>
-          <a href="/api/dossier" target="_blank" class="btn-action">
-            <span>📊 Master JSON</span>
+          <a href="/api/dossier" target="_blank" rel="noopener" class="btn-action" data-deliverable="master_json_dossier">
+            <span>Master JSON</span>
           </a>
-          <a href="/outputs/candidate_borehole_sites.kmz" download class="btn-action">
-            <span>📍 Boreholes KMZ</span>
+          <a href="/outputs/candidate_borehole_sites.kmz" download class="btn-action" data-deliverable="boreholes_kmz">
+            <span>Boreholes KMZ</span>
           </a>
-          <a href="/outputs/candidate_land_zones.kmz" download class="btn-action">
-            <span>🌱 Soil Zones KMZ</span>
+          <a href="/outputs/candidate_mineral_targets.kmz" download class="btn-action" data-deliverable="minerals_kmz">
+            <span>Minerals KMZ</span>
           </a>
-          <a href="/outputs/safest_buildable_sites.kmz" download class="btn-action">
-            <span>🛡️ Safety Sites KMZ</span>
+          <a href="/outputs/candidate_land_zones.kmz" download class="btn-action" data-deliverable="soil_kmz">
+            <span>Soil Zones KMZ</span>
+          </a>
+          <a href="/outputs/safest_buildable_sites.kmz" download class="btn-action" data-deliverable="safest_sites_kmz">
+            <span>Safety Sites KMZ</span>
           </a>
         </div>
+        <p class="field-hint" id="downloads-note">Unavailable files are shown greyed out; they are produced by a completed survey.</p>
       </div>
 
       <!-- Legal Disclaimer -->
       <div class="disclaimer">
-        ⚠ Screening-level Earth observation model only. Ground geophysics (VES/ERT) & geotechnical testing required prior to drilling or excavation.
+        Screening-level Earth observation model only. Scores are relative percentile ranks within the chosen AOI, not absolute measurements, and are not comparable between surveys. Ground geophysics (VES/ERT) and geotechnical testing are required before drilling or excavation.
       </div>
 
     </div>
 
     <!-- Right Map Viewport -->
-    <div id="map"></div>
+    <div id="map" role="region" aria-label="Satellite map of the survey area"></div>
 
     <!-- Floating Top Info Banner -->
-    <div class="map-banner">
-      <span>AOI: <strong>Gweru, Zimbabwe (19.50°S, 29.85°E)</strong></span>
-      <span>CRS: <strong>UTM Zone 35S (EPSG:32735)</strong></span>
-      <span>Imagery: <strong>DE Africa GeoMAD & Landsat 30m</strong></span>
+    <div class="map-banner" id="map-banner">
+      <span>AOI: <strong id="banner-aoi">19.5049°S, 29.8460°E</strong></span>
+      <span>CRS: <strong id="banner-crs">UTM Zone 35S (EPSG:32735)</strong></span>
+      <span>Imagery: <strong id="banner-imagery">DE Africa GeoMAD &amp; Landsat 30 m</strong></span>
     </div>
 
   </div>
 
   <script>
-    // Initialize Map
-    const initialLat = -19.50487;
-    const initialLon = 29.84598;
+    (function () {
+      'use strict';
 
-    const map = L.map('map', {
-      zoomControl: true,
-      maxZoom: 18,
-    }).setView([initialLat, initialLon], 13);
+      // Digital Earth Africa serves roughly this envelope. Checked here as well as on the
+      // server so an out-of-coverage pin fails instantly instead of after a download.
+      var COVERAGE = { latMin: -56, latMax: 41, lonMin: -30, lonMax: 66 };
+      var POLL_INTERVAL_MS = 2000;
+      var POLL_LIMIT = 900; // ~30 minutes
 
-    // Basemap Layers
-    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri, Earthstar Geographics, Digital Earth Africa',
-      maxZoom: 18
-    }).addTo(map);
+      var CATEGORIES = [
+        { key: 'water', kind: 'Borehole', color: '#0284c7', prefix: 'B', action: 'Vertical Electrical Sounding (VES) resistivity verification' },
+        { key: 'minerals', kind: 'Mineral target', color: '#d97706', prefix: 'M', action: 'Ground mapping and soil geochemical sampling' },
+        { key: 'soil', kind: 'Land zone', color: '#16a34a', prefix: 'S', action: 'Soil profile test and pH analysis' },
+        { key: 'hazard', kind: 'Safe site', color: '#059669', prefix: 'H', action: 'Geotechnical foundation investigation' }
+      ];
 
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
-    });
+      var INITIAL = { lat: -19.50487, lon: 29.84598 };
 
-    const baseMaps = {
-      "Satellite (Esri Imagery)": esriSatellite,
-      "Street Map (OpenStreetMap)": osm
-    };
-    L.control.layers(baseMaps, null, { position: 'bottomright' }).addTo(map);
+      var map = null;
+      var targetMarker = null;
+      var candidateLayer = null;
+      var aoiLayer = null;
+      var busy = false;
 
-    // Target Pin Marker
-    let targetMarker = L.marker([initialLat, initialLon], {
-      draggable: true,
-      title: "Client Target Site"
-    }).addTo(map);
+      function $(id) { return document.getElementById(id); }
+      function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
-    targetMarker.bindPopup("<b>Client Property Target</b><br>Lat: " + initialLat + "<br>Lon: " + initialLon).openPopup();
+      function num(value) {
+        return (typeof value === 'number' && Number.isFinite(value)) ? value : null;
+      }
 
-    targetMarker.on('dragend', function (e) {
-      const pos = e.target.getLatLng();
-      document.getElementById('lat').value = pos.lat.toFixed(5);
-      document.getElementById('lon').value = pos.lng.toFixed(5);
-      targetMarker.bindPopup("<b>Client Property Target</b><br>Lat: " + pos.lat.toFixed(5) + "<br>Lon: " + pos.lng.toFixed(5)).openPopup();
-    });
+      function fmtScore(value) {
+        var v = num(value);
+        return v === null ? '—' : v.toFixed(1);
+      }
 
-    // Map Click Listener to re-position target marker
-    map.on('click', function(e) {
-      const lat = e.latlng.lat.toFixed(5);
-      const lon = e.latlng.lng.toFixed(5);
-      document.getElementById('lat').value = lat;
-      document.getElementById('lon').value = lon;
-      targetMarker.setLatLng(e.latlng);
-      targetMarker.bindPopup("<b>Target Site</b><br>Lat: " + lat + "<br>Lon: " + lon).openPopup();
-    });
+      function fmtKm(value) {
+        var v = num(value);
+        return v === null ? '—' : v.toFixed(2) + ' km';
+      }
 
-    // Marker Groups for Candidates
-    const candidateLayerGroup = L.layerGroup().addTo(map);
+      function dms(value, positive, negative) {
+        return Math.abs(value).toFixed(4) + '°' + (value >= 0 ? positive : negative);
+      }
 
-    // Create colored pin icons
-    function createColorIcon(color, text) {
-      return L.divIcon({
-        className: 'custom-pin',
-        html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 11px;">${text}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      });
-    }
+      // ---------------------------------------------------------------- networking
+      async function fetchJson(url, options, timeoutMs) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 30000);
+        try {
+          var opts = options || {};
+          opts.signal = controller.signal;
+          opts.cache = 'no-store';
+          var resp = await fetch(url, opts);
+          var text = await resp.text();
+          var body = null;
+          if (text) {
+            try { body = JSON.parse(text); } catch (e) { body = null; }
+          }
+          if (!resp.ok) {
+            var detail = body && body.detail;
+            var message = (detail && detail.message) || (typeof detail === 'string' ? detail : null) ||
+                          ('Server returned HTTP ' + resp.status + '.');
+            var err = new Error(message);
+            err.code = detail && detail.code;
+            err.hint = detail && detail.hint;
+            err.requestId = detail && detail.request_id;
+            throw err;
+          }
+          if (!body) {
+            throw new Error('The server returned a response that was not JSON.');
+          }
+          return body;
+        } catch (e) {
+          if (e.name === 'AbortError') {
+            throw new Error('The request timed out before the server answered.');
+          }
+          throw e;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
 
-    // Survey Execution
-    async function executeSurvey() {
-      const lat = parseFloat(document.getElementById('lat').value);
-      const lon = parseFloat(document.getElementById('lon').value);
-      const client = document.getElementById('client').value;
-      const address = document.getElementById('address').value;
+      // ---------------------------------------------------------------- UI state
+      function showError(title, message, hint, requestId) {
+        var box = $('error-region');
+        box.textContent = '';
+        box.hidden = false;
 
-      const categories = [];
-      if (document.getElementById('cat-water').checked) categories.push('water');
-      if (document.getElementById('cat-minerals').checked) categories.push('minerals');
-      if (document.getElementById('cat-soil').checked) categories.push('soil');
-      if (document.getElementById('cat-hazard').checked) categories.push('hazard');
+        var heading = document.createElement('strong');
+        heading.textContent = title;
+        box.appendChild(heading);
 
-      const btn = document.getElementById('btn-run');
-      const btnText = document.getElementById('btn-text');
-      btn.disabled = true;
-      btnText.innerHTML = '<span class="spinner"></span> Siting Analysis Running...';
+        var body = document.createElement('div');
+        body.textContent = message;
+        box.appendChild(body);
 
-      try {
-        const resp = await fetch('/api/survey', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            latitude: lat,
-            longitude: lon,
-            categories: categories.length ? categories : ['all'],
-            client_name: client,
-            address: address
-          })
-        });
+        if (hint) {
+          var hintEl = document.createElement('div');
+          hintEl.className = 'error-hint';
+          hintEl.textContent = hint;
+          box.appendChild(hintEl);
+        }
+        if (requestId) {
+          var idEl = document.createElement('div');
+          idEl.className = 'error-id';
+          idEl.textContent = 'Reference: ' + requestId;
+          box.appendChild(idEl);
+        }
+      }
 
-        if (!resp.ok) {
-          throw new Error('Server returned HTTP ' + resp.status);
+      function clearError() {
+        var box = $('error-region');
+        box.hidden = true;
+        box.textContent = '';
+      }
+
+      function setBusy(value) {
+        busy = value;
+        var btn = $('btn-run');
+        var label = $('btn-text');
+        btn.disabled = value;
+        btn.setAttribute('aria-busy', value ? 'true' : 'false');
+        label.textContent = value ? 'Siting analysis running…' : 'Execute Screening Survey';
+      }
+
+      function setProgress(visible) {
+        $('progress').hidden = !visible;
+        if (!visible) {
+          $('progress-bar').style.width = '0%';
+          $('progress').setAttribute('aria-valuenow', '0');
+        }
+      }
+
+      function updateProgress(percent, stage) {
+        var pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+        setProgress(true);
+        $('progress-bar').style.width = pct + '%';
+        $('progress').setAttribute('aria-valuenow', String(pct));
+        $('progress-stage').textContent = stage ? (stage + ' — ' + pct + '%') : (pct + '%');
+      }
+
+      function badgeFor(value) {
+        if (value === null) { return { cls: 'badge-na', text: 'Not run' }; }
+        if (value >= 75) { return { cls: 'badge-high', text: 'High' }; }
+        if (value >= 50) { return { cls: 'badge-mod', text: 'Moderate' }; }
+        return { cls: 'badge-low', text: 'Low' };
+      }
+
+      function setCard(scoreId, badgeId, value, serverClass) {
+        var scoreEl = $(scoreId);
+        var badgeEl = $(badgeId);
+        scoreEl.textContent = fmtScore(value);
+        if (num(value) !== null) {
+          var suffix = document.createElement('span');
+          suffix.textContent = ' /100';
+          scoreEl.appendChild(suffix);
+        }
+        var badge = badgeFor(num(value));
+        badgeEl.textContent = (serverClass && String(serverClass)) || badge.text;
+        badgeEl.className = 'card-badge ' + badge.cls;
+      }
+
+      // ---------------------------------------------------------------- map
+      function initMap() {
+        if (typeof L === 'undefined') {
+          showError('Map unavailable', 'The map library could not be loaded from its CDN. The survey form still works, but candidate pins cannot be drawn.');
+          return;
         }
 
-        const data = await resp.json();
-        renderResults(data);
-      } catch (err) {
-        alert('Survey failed: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btnText.innerText = 'Execute Screening Survey';
-      }
-    }
+        map = L.map('map', { zoomControl: true, maxZoom: 18 }).setView([INITIAL.lat, INITIAL.lon], 13);
 
-    function renderResults(data) {
-      candidateLayerGroup.clearLayers();
-      const container = document.getElementById('candidates-container');
-      container.innerHTML = '';
+        var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Tiles &copy; Esri, Earthstar Geographics, Digital Earth Africa',
+          maxZoom: 18
+        }).addTo(map);
 
-      const sc = data.executive_scorecard || {};
+        var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
+          maxZoom: 19
+        });
 
-      // Groundwater Scorecard
-      if (sc.groundwater) {
-        document.getElementById('score-water').innerHTML = (sc.groundwater.cell_score || 0).toFixed(1) + ' <span>/100</span>';
-        document.getElementById('badge-water').innerText = sc.groundwater.cell_class || 'Moderate';
-      }
+        L.control.layers({ 'Satellite (Esri Imagery)': satellite, 'Street Map (OpenStreetMap)': osm }, null, { position: 'bottomright' }).addTo(map);
 
-      // Minerals Scorecard
-      if (sc.minerals) {
-        document.getElementById('score-minerals').innerHTML = (sc.minerals.cell_score || 0).toFixed(1) + ' <span>/100</span>';
-        document.getElementById('badge-minerals').innerText = sc.minerals.cell_class || 'Moderate';
-      }
+        targetMarker = L.marker([INITIAL.lat, INITIAL.lon], { draggable: true, title: 'Target site', alt: 'Target site marker' }).addTo(map);
+        targetMarker.bindPopup(targetPopup(INITIAL.lat, INITIAL.lon));
 
-      // Soil Scorecard
-      if (sc.soil_land) {
-        document.getElementById('score-soil').innerHTML = (sc.soil_land.cell_score || 0).toFixed(1) + ' <span>/100</span>';
-        document.getElementById('badge-soil').innerText = sc.soil_land.cell_class || 'Moderate';
+        targetMarker.on('dragend', function (event) {
+          var pos = event.target.getLatLng();
+          moveTarget(pos.lat, pos.lng);
+        });
+
+        map.on('click', function (event) {
+          moveTarget(event.latlng.lat, event.latlng.lng);
+        });
+
+        candidateLayer = L.layerGroup().addTo(map);
       }
 
-      // Safety Scorecard
-      if (sc.hazard_safety) {
-        document.getElementById('score-safety').innerHTML = (sc.hazard_safety.safety_score || 0).toFixed(1) + ' <span>/100</span>';
-        document.getElementById('badge-safety').innerText = (sc.hazard_safety.hazard_class || 'Safe');
+      function targetPopup(lat, lon) {
+        var node = document.createElement('div');
+        node.style.fontSize = '12px';
+        var heading = document.createElement('b');
+        heading.textContent = 'Target site';
+        node.appendChild(heading);
+        node.appendChild(document.createElement('br'));
+        node.appendChild(document.createTextNode('Lat: ' + lat.toFixed(5)));
+        node.appendChild(document.createElement('br'));
+        node.appendChild(document.createTextNode('Lon: ' + lon.toFixed(5)));
+        return node;
       }
 
-      // Collect top candidates from categories
-      const allCands = [];
+      function moveTarget(lat, lon) {
+        $('lat').value = lat.toFixed(5);
+        $('lon').value = lon.toFixed(5);
+        if (targetMarker) {
+          targetMarker.setLatLng([lat, lon]);
+          targetMarker.bindPopup(targetPopup(lat, lon)).openPopup();
+        }
+        $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
+      }
 
-      // Boreholes
-      const waterData = data.categories?.water;
-      if (waterData && waterData.candidate_sites) {
-        waterData.candidate_sites.forEach((c, idx) => {
-          allCands.push({
-            type: 'Borehole',
-            color: '#0284c7',
-            rank: 'B' + (idx + 1),
-            score: c.potential_score || c.score,
-            lat: c.latitude,
-            lon: c.longitude,
-            dist: c.distance_from_target_km || 0,
-            action: 'VES Resistivity Sounding verification required'
+      function pinIcon(color, text) {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'background-color:' + color + ';width:26px;height:26px;border-radius:50%;border:2px solid #fff;' +
+                             'box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;' +
+                             'color:#fff;font-weight:800;font-size:11px;';
+        wrap.textContent = text;
+        return L.divIcon({ className: 'custom-pin', html: wrap.outerHTML, iconSize: [26, 26], iconAnchor: [13, 13] });
+      }
+
+      function applyTarget(target) {
+        if (!target) { return; }
+        var lat = num(target.latitude);
+        var lon = num(target.longitude);
+        if (lat === null || lon === null) { return; }
+
+        $('banner-aoi').textContent = dms(lat, 'N', 'S') + ', ' + dms(lon, 'E', 'W');
+        if (target.crs) {
+          $('banner-crs').textContent = 'UTM Zone ' + (target.utm_zone || '') + ' (' + target.crs + ')';
+        }
+
+        if (!map) { return; }
+        if (targetMarker) { targetMarker.setLatLng([lat, lon]); }
+
+        var bbox = Array.isArray(target.bbox_wgs84) ? target.bbox_wgs84 : null;
+        if (bbox && bbox.length === 4) {
+          var bounds = [[bbox[1], bbox[0]], [bbox[3], bbox[2]]];
+          if (aoiLayer) {
+            aoiLayer.setBounds(bounds);
+          } else {
+            aoiLayer = L.rectangle(bounds, { color: '#38bdf8', weight: 2, fill: false, dashArray: '6 4' }).addTo(map);
+          }
+          map.fitBounds(bounds, { padding: [30, 30] });
+        } else {
+          map.flyTo([lat, lon], 13);
+        }
+      }
+
+      function clearCandidates() {
+        if (candidateLayer) { candidateLayer.clearLayers(); }
+        var container = $('candidates-container');
+        container.textContent = '';
+      }
+
+      function collectCandidates(data) {
+        var raw = data.candidates || (data.categories ? {
+          water: (data.categories.water || {}).candidate_sites || [],
+          minerals: (data.categories.minerals || {}).candidate_targets || [],
+          soil: (data.categories.soil_land || {}).candidate_areas || [],
+          hazard: (data.categories.hazard_safety || {}).safest_candidate_sites || []
+        } : {});
+
+        var out = [];
+        CATEGORIES.forEach(function (cat) {
+          var list = raw[cat.key] || [];
+          list.slice(0, 4).forEach(function (item, index) {
+            var lat = num(item.latitude);
+            var lon = num(item.longitude);
+            if (lat === null || lon === null) { return; }
+            out.push({
+              category: cat,
+              rank: cat.prefix + (index + 1),
+              lat: lat,
+              lon: lon,
+              score: num(item.potential_score) !== null ? num(item.potential_score) : num(item.prospectivity_score),
+              dist: num(item.distance_from_target_km)
+            });
           });
+        });
+        return out;
+      }
+
+      function renderCandidates(list) {
+        clearCandidates();
+        var container = $('candidates-container');
+
+        if (!list.length) {
+          var empty = document.createElement('p');
+          empty.className = 'cand-empty';
+          empty.textContent = 'No candidates were returned for this survey. Open the executive dossier for the full maps and caveats.';
+          container.appendChild(empty);
+          return;
+        }
+
+        list.forEach(function (cand) {
+          var item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'cand-item';
+          item.setAttribute('role', 'listitem');
+
+          var rank = document.createElement('span');
+          rank.className = 'cand-rank';
+          rank.style.color = cand.category.color;
+          rank.textContent = cand.rank;
+
+          var info = document.createElement('span');
+          info.className = 'cand-info';
+          var name = document.createElement('span');
+          name.className = 'cand-name';
+          name.textContent = cand.category.kind + ' (' + fmtKm(cand.dist) + ')';
+          var coords = document.createElement('span');
+          coords.className = 'cand-coords';
+          coords.textContent = cand.lat.toFixed(4) + ', ' + cand.lon.toFixed(4);
+          info.appendChild(name);
+          info.appendChild(document.createElement('br'));
+          info.appendChild(coords);
+
+          var score = document.createElement('span');
+          score.className = 'cand-score';
+          score.textContent = fmtScore(cand.score) + ' pts';
+
+          item.appendChild(rank);
+          item.appendChild(info);
+          item.appendChild(score);
+
+          if (map && candidateLayer) {
+            var marker = L.marker([cand.lat, cand.lon], { icon: pinIcon(cand.category.color, cand.rank), title: cand.category.kind + ' ' + cand.rank }).addTo(candidateLayer);
+            marker.bindPopup(candidatePopup(cand));
+            item.addEventListener('click', function () {
+              map.flyTo([cand.lat, cand.lon], 15);
+              marker.openPopup();
+            });
+          }
+
+          container.appendChild(item);
         });
       }
 
-      // Minerals
-      const minData = data.categories?.minerals;
-      if (minData && minData.candidate_targets) {
-        minData.candidate_targets.forEach((c, idx) => {
-          allCands.push({
-            type: 'Mineral Target',
-            color: '#d97706',
-            rank: 'M' + (idx + 1),
-            score: c.potential_score || c.prospectivity_score,
-            lat: c.latitude,
-            lon: c.longitude,
-            dist: c.distance_from_target_km || 0,
-            action: 'Geochemical soil sampling'
-          });
+      function candidatePopup(cand) {
+        var node = document.createElement('div');
+        node.style.fontSize = '12px';
+
+        var heading = document.createElement('b');
+        heading.style.color = cand.category.color;
+        heading.textContent = cand.category.kind + ' ' + cand.rank;
+        node.appendChild(heading);
+        node.appendChild(document.createElement('br'));
+
+        [['Score', fmtScore(cand.score) + ' / 100'],
+         ['Distance', fmtKm(cand.dist) + ' from target'],
+         ['GPS', cand.lat.toFixed(5) + ', ' + cand.lon.toFixed(5)]].forEach(function (pair) {
+          var strong = document.createElement('strong');
+          strong.textContent = pair[0] + ': ';
+          node.appendChild(strong);
+          node.appendChild(document.createTextNode(pair[1]));
+          node.appendChild(document.createElement('br'));
         });
+
+        var action = document.createElement('p');
+        action.style.cssText = 'margin-top:6px;font-size:11px;color:#475569;';
+        action.textContent = cand.category.action;
+        node.appendChild(action);
+        return node;
       }
 
-      // Render candidates list & map markers
-      allCands.slice(0, 12).forEach(c => {
-        // Marker
-        const marker = L.marker([c.lat, c.lon], {
-          icon: createColorIcon(c.color, c.rank)
-        }).addTo(candidateLayerGroup);
+      // ---------------------------------------------------------------- downloads
+      function applyDownloads(urls) {
+        var links = document.querySelectorAll('[data-deliverable]');
+        Array.prototype.forEach.call(links, function (link) {
+          var key = link.getAttribute('data-deliverable');
+          if (!urls) { return; }
+          if (urls[key]) {
+            link.href = urls[key];
+            link.removeAttribute('aria-disabled');
+            link.removeAttribute('tabindex');
+            link.classList.remove('is-disabled');
+          } else {
+            link.removeAttribute('href');
+            link.setAttribute('aria-disabled', 'true');
+            link.setAttribute('tabindex', '-1');
+            link.classList.add('is-disabled');
+          }
+        });
 
-        marker.bindPopup(`
-          <div style="font-size:12px;">
-            <b style="color:${c.color}; font-size:13px;">${c.type} #${c.rank}</b><br>
-            <strong>Score:</strong> ${c.score.toFixed(1)} / 100<br>
-            <strong>Distance:</strong> ${c.dist.toFixed(2)} km from target<br>
-            <strong>GPS:</strong> ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}<br>
-            <p style="margin-top:6px; font-size:11px; color:#555;">${c.action}</p>
-          </div>
-        `);
+        var disabled = document.querySelectorAll('[data-deliverable][aria-disabled="true"]').length;
+        $('downloads-note').textContent = disabled
+          ? 'Only the files this survey produced are enabled; greyed-out exports were not generated.'
+          : 'All exports below are ready for download.';
+      }
 
-        // List item
-        const div = document.createElement('div');
-        div.className = 'cand-item';
-        div.innerHTML = `
-          <div class="cand-rank" style="color: ${c.color};">${c.rank}</div>
-          <div class="cand-info">
-            <div style="font-weight:600; font-size:11.5px;">${c.type} (${c.dist.toFixed(2)} km)</div>
-            <div class="cand-coords">${c.lat.toFixed(4)}°, ${c.lon.toFixed(4)}°</div>
-          </div>
-          <div class="cand-score">${c.score.toFixed(0)} pts</div>
-        `;
-        div.onclick = () => {
-          map.flyTo([c.lat, c.lon], 15);
-          marker.openPopup();
+      // ---------------------------------------------------------------- results
+      function renderResults(data, options) {
+        var opts = options || {};
+        var scorecard = data.executive_scorecard || null;
+        var scores = data.scores || null;
+
+        function pick(family) {
+          if (scorecard) { return scorecard[family] || {}; }
+          if (scores) { return scores[family] || {}; }
+          return {};
+        }
+
+        var water = pick('groundwater');
+        var minerals = pick('minerals');
+        var soil = pick('soil_land');
+        var hazard = pick('hazard_safety');
+
+        setCard('score-water', 'badge-water', num(water.cell_score), water.cell_class);
+        setCard('score-minerals', 'badge-minerals', num(minerals.cell_score), minerals.cell_class);
+        setCard('score-soil', 'badge-soil', num(soil.cell_score), soil.cell_class);
+        setCard('score-safety', 'badge-safety', num(hazard.safety_score), hazard.hazard_class);
+
+        renderCandidates(collectCandidates(data));
+
+        var note = $('results-note');
+        note.hidden = false;
+        if (opts.source === 'dossier') {
+          var when = '';
+          if (data.generated_at) {
+            var parsed = new Date(String(data.generated_at).replace(' ', 'T'));
+            if (!isNaN(parsed.getTime())) { when = ' (' + parsed.toLocaleString() + ')'; }
+          }
+          note.textContent = 'Showing the most recently completed survey on this instance' + when +
+            '. Run a survey for your own coordinate — this is not your target.';
+        } else {
+          note.textContent = 'Scores are percentile ranks within this AOI, not absolute measurements. Two surveys are not comparable.';
+        }
+      }
+
+      // ---------------------------------------------------------------- survey run
+      async function pollJob(jobId) {
+        for (var attempt = 0; attempt < POLL_LIMIT; attempt++) {
+          await sleep(POLL_INTERVAL_MS);
+          var job = await fetchJson('/api/jobs/' + encodeURIComponent(jobId), {}, 30000);
+
+          if (job.status === 'succeeded') {
+            updateProgress(100, 'Complete');
+            return job.result;
+          }
+          if (job.status === 'failed') {
+            var err = new Error((job.error && job.error.message) || 'The survey failed inside the engine.');
+            err.requestId = job.error && job.error.request_id;
+            err.hint = 'Retry once. If it keeps failing, try a smaller survey radius.';
+            throw err;
+          }
+          updateProgress(job.progress || 5, job.stage || 'Working');
+        }
+        throw new Error('The survey is still running after 30 minutes. It was left to finish server-side; reload the page later to see the latest dossier.');
+      }
+
+      async function executeSurvey(event) {
+        if (event) { event.preventDefault(); }
+        if (busy) { return; }
+        clearError();
+
+        var lat = Number($('lat').value);
+        var lon = Number($('lon').value);
+
+        if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+          showError('Check the latitude', 'Latitude must be a number between −90 and 90.');
+          return;
+        }
+        if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+          showError('Check the longitude', 'Longitude must be a number between −180 and 180.');
+          return;
+        }
+        if (lat < COVERAGE.latMin || lat > COVERAGE.latMax || lon < COVERAGE.lonMin || lon > COVERAGE.lonMax) {
+          showError('Outside satellite coverage',
+            'Digital Earth Africa serves roughly 30°W–66°E and 56°S–41°N. This coordinate falls outside it, so there is no imagery to screen.');
+          return;
+        }
+
+        var categories = CATEGORIES
+          .map(function (cat) { return cat.key; })
+          .filter(function (key) { return $('cat-' + key).checked; });
+
+        var payload = {
+          latitude: lat,
+          longitude: lon,
+          half_deg: Number($('half-deg').value),
+          categories: categories.length ? categories : ['all'],
+          client_name: $('client').value.trim() || 'Client',
+          address: $('address').value.trim(),
+          async_mode: true
         };
-        container.appendChild(div);
-      });
 
-      if (allCands.length === 0) {
-        container.innerHTML = '<div style="font-size:11.5px; color:#94a3b8; text-align:center; padding:15px;">Survey completed. Check full HTML report for detailed maps.</div>';
-      }
-    }
+        setBusy(true);
+        updateProgress(2, 'Submitting survey');
+        $('banner-imagery').textContent = 'DE Africa GeoMAD & Landsat 30 m';
 
-    // Load initial candidates from server on load
-    window.addEventListener('DOMContentLoaded', async () => {
-      try {
-        const resp = await fetch('/api/dossier');
-        if (resp.ok) {
-          const dossier = await resp.json();
-          renderResults(dossier);
+        try {
+          var submitted = await fetchJson('/api/survey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }, 30000);
+
+          if (!submitted.job_id) {
+            throw new Error('The server accepted the survey but returned no job id.');
+          }
+
+          var result = await pollJob(submitted.job_id);
+
+          applyTarget(result.target);
+          renderResults(result, { source: 'survey' });
+          applyDownloads(result.download_urls || {});
+          $('progress-stage').textContent = 'Survey complete.';
+          $('downloads-note').textContent = (result.deliverables_missing || []).length
+            ? 'Some exports were not produced by this run and are greyed out.'
+            : 'All exports are ready.';
+          setTimeout(function () { setProgress(false); }, 2500);
+        } catch (err) {
+          showError('Survey failed', err.message, err.hint, err.requestId);
+          $('progress-stage').textContent = 'Survey stopped.';
+          setProgress(false);
+        } finally {
+          setBusy(false);
         }
-      } catch (e) {
-        console.warn('Initial dossier preload skipped:', e);
       }
-    });
+
+      // ---------------------------------------------------------------- boot
+      async function preloadLastSurvey() {
+        try {
+          var dossier = await fetchJson('/api/dossier', {}, 20000);
+          var statuses = dossier.category_status || {};
+          var anyLoaded = Object.keys(statuses).some(function (key) { return statuses[key] === 'loaded'; });
+          if (!anyLoaded) {
+            $('results-note').hidden = false;
+            $('results-note').textContent = 'No completed survey yet on this instance. Pick a coordinate and run one.';
+            return;
+          }
+          renderResults(dossier, { source: 'dossier' });
+          if (dossier.target_coordinates) {
+            applyTarget({
+              latitude: dossier.target_coordinates.latitude,
+              longitude: dossier.target_coordinates.longitude
+            });
+          }
+        } catch (e) {
+          // A previous survey is optional; the form works without one.
+        }
+      }
+
+      initMap();
+      $('survey-form').addEventListener('submit', executeSurvey);
+      preloadLastSurvey();
+    })();
   </script>
 </body>
 </html>
-

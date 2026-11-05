@@ -2,7 +2,7 @@
 
 **Autonomous Satellite Geospatial Intelligence Engine** by [Eineva Labs](https://eineva.com).
 
-SiteSurveyor AI ingests multi-sensor Earth observation satellite data (Copernicus Sentinel-2, Copernicus DEM 30m, JAXA ALOS PALSAR, Landsat WOfS 1984–2024, ESA WorldCover, and CHIRPS precipitation) through multi-criteria decision analysis (AHP / MCDA) to deliver automated site screening, natural hazard due diligence, and precision GPS targeting.
+SiteSurveyor AI ingests multi-sensor Earth observation satellite data (Copernicus Sentinel-2, Copernicus DEM 30m, JAXA ALOS PALSAR, Landsat WOfS 1984–2024, ESA WorldCover, and CHIRPS precipitation) through multi-criteria decision analysis (AHP / MCDA) to deliver automated site screening, natural hazard due diligence, and prioritised field targeting.
 
 ---
 
@@ -36,7 +36,7 @@ Add this to your MCP configuration (`claude_desktop_config.json` or `.cursor/mcp
 
 ### 2. Tools Available to the Agent:
 * `survey_site(latitude, longitude, categories)` — Full multi-domain site screening.
-* `get_boreholes(latitude, longitude)` — Precision borehole drilling targets with VES advice.
+* `get_boreholes(latitude, longitude)` — Prioritised borehole investigation targets with VES advice.
 * `get_minerals(latitude, longitude)` — Shear-zone gold prospectivity & hydrothermal alteration.
 * `get_soil_capability(latitude, longitude)` — Agricultural suitability & erosion risk.
 * `get_hazard_safety(latitude, longitude)` — Natural hazards (flood, slope failure, wildfire) and safest buildable sites.
@@ -105,7 +105,7 @@ SiteSurveyorAI/
     │   ├── __init__.py
     │   └── server.py           # Official MCP 2.x server definition with tools & resources
     ├── engines/
-    │   ├── water.py            # Category 1: Groundwater potential & precision siting
+    │   ├── water.py            # Category 1: Groundwater potential & prioritised siting
     │   ├── minerals.py         # Category 2: Shear-zone gold prospectivity screening
     │   ├── soil.py             # Category 3: Land capability & erosion risk
     │   └── hazard.py           # Category 5: Multi-hazard & site safety screening
