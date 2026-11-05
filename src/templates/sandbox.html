@@ -306,6 +306,19 @@
       width: 32px;
       justify-content: center;
     }
+    .tool--active,
+    .tool.is-active {
+      background: var(--panel-sunken);
+      color: var(--brand);
+      border-color: var(--brand-border);
+    }
+    .tool-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--line);
+      margin: 0 3px;
+      flex: 0 0 auto;
+    }
 
     /* Dark/Light mode icon toggling */
     [data-theme="dark"] .icon-moon { display: none; }
@@ -361,22 +374,87 @@
       display: grid;
       grid-template-columns: 290px minmax(0, 1fr) 410px;
       background: var(--bg-deep);
+      transition: grid-template-columns 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .workspace.is-left-collapsed { grid-template-columns: 0 minmax(0, 1fr) 410px; }
     .workspace.is-right-collapsed { grid-template-columns: 290px minmax(0, 1fr) 0; }
     .workspace.is-left-collapsed.is-right-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
-    .workspace.is-left-collapsed .panel--left,
-    .workspace.is-right-collapsed .panel--right { display: none; }
 
     .panel {
       display: flex;
       flex-direction: column;
       min-height: 0;
+      min-width: 0;
       background: var(--panel);
+      overflow: hidden;
+      transition: opacity 0.18s ease, visibility 0.18s ease;
     }
     .panel--left { border-right: 1px solid var(--line); }
     .panel--right { border-left: 1px solid var(--line); }
+
+    .workspace.is-left-collapsed .panel--left {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      border-right-color: transparent;
+    }
+    .workspace.is-right-collapsed .panel--right {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      border-left-color: transparent;
+    }
+
+    /* ------------------------------------------------------------------ edge tabs (re-open sidebars) */
+    .edge-tab {
+      position: absolute;
+      top: 66px;
+      z-index: 550;
+      display: none;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      background: var(--panel-raised);
+      border: 1px solid var(--line-strong);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: background 0.15s, border-color 0.15s, transform 0.15s, color 0.15s;
+    }
+    .edge-tab:hover {
+      background: var(--panel);
+      border-color: var(--brand);
+      color: var(--brand);
+      transform: translateY(-1px);
+    }
+    .edge-tab svg {
+      color: var(--muted);
+      transition: color 0.15s;
+    }
+    .edge-tab:hover svg {
+      color: var(--brand);
+    }
+    .edge-tab--left {
+      left: 14px;
+    }
+    .edge-tab--right {
+      right: 14px;
+    }
+    .workspace.is-left-collapsed .edge-tab--left {
+      display: inline-flex;
+    }
+    .workspace.is-right-collapsed .edge-tab--right {
+      display: inline-flex;
+    }
 
     .panel__header {
       flex: 0 0 auto;
@@ -1003,10 +1081,19 @@
         grid-template-columns: none;
       }
       .panel--left, .panel--right {
-        display: flex !important;
+        display: flex;
         width: 100%;
         border-left: 0; border-right: 0;
         border-top: 1px solid var(--line);
+      }
+      .workspace.is-left-collapsed .panel--left {
+        display: none !important;
+      }
+      .workspace.is-right-collapsed .panel--right {
+        display: none !important;
+      }
+      .edge-tab {
+        display: none !important;
       }
       .panel--left { order: 3; }
       .panel--right { order: 2; }
@@ -1078,6 +1165,13 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
         Dossier
       </a>
+      <div class="tool-divider" aria-hidden="true"></div>
+      <button type="button" class="tool tool--icon" id="btn-toggle-left-bar" title="Toggle Contents (left panel)" aria-label="Toggle contents panel" aria-expanded="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
+      </button>
+      <button type="button" class="tool tool--icon" id="btn-toggle-right-bar" title="Toggle Analysis (right panel)" aria-label="Toggle analysis panel" aria-expanded="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
+      </button>
       <button type="button" class="tool tool--icon" id="btn-theme" title="Toggle dark/light theme" aria-label="Toggle theme">
         <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
         <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -1153,6 +1247,16 @@
     <!-- map -->
     <section class="map-wrap" aria-label="Map canvas">
       <div id="map" role="region" aria-label="Satellite map of the survey area"></div>
+
+      <!-- Edge Unfold Tabs (visible when respective panel is collapsed) -->
+      <button type="button" class="edge-tab edge-tab--left" id="btn-unfold-left" title="Show Contents (Layers & Legend)" aria-label="Show contents panel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        <span>Contents</span>
+      </button>
+      <button type="button" class="edge-tab edge-tab--right" id="btn-unfold-right" title="Show Analysis panel" aria-label="Show analysis panel">
+        <span>Analysis</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
 
       <div class="map-chips">
         <span class="chip chip--accent">AOI <b id="banner-aoi">19.5049°S, 29.8460°E</b></span>
@@ -2042,19 +2146,71 @@
         var workspace = $('workspace');
         var left = $('toggle-left');
         var right = $('toggle-right');
+        var barLeft = $('btn-toggle-left-bar');
+        var barRight = $('btn-toggle-right-bar');
+        var unfoldLeft = $('btn-unfold-left');
+        var unfoldRight = $('btn-unfold-right');
 
-        left.addEventListener('click', function () {
-          var collapsed = workspace.classList.toggle('is-left-collapsed');
-          left.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-          left.title = collapsed ? 'Show contents' : 'Collapse contents';
-          if (map) { setTimeout(function () { map.invalidateSize(); }, 220); }
+        function triggerResize() {
+          if (!map) return;
+          map.invalidateSize();
+          setTimeout(function () { if (map) map.invalidateSize(); }, 60);
+          setTimeout(function () { if (map) map.invalidateSize(); }, 150);
+          setTimeout(function () { if (map) map.invalidateSize(); }, 260);
+        }
+
+        function setLeftCollapsed(collapsed) {
+          workspace.classList.toggle('is-left-collapsed', collapsed);
+          if (left) {
+            left.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            left.title = collapsed ? 'Show contents' : 'Collapse contents';
+          }
+          if (barLeft) {
+            barLeft.classList.toggle('is-active', !collapsed);
+            barLeft.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            barLeft.title = collapsed ? 'Show Contents (left sidebar)' : 'Hide Contents (left sidebar)';
+          }
+          triggerResize();
+        }
+
+        function setRightCollapsed(collapsed) {
+          workspace.classList.toggle('is-right-collapsed', collapsed);
+          if (right) {
+            right.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            right.title = collapsed ? 'Show analysis' : 'Collapse analysis';
+          }
+          if (barRight) {
+            barRight.classList.toggle('is-active', !collapsed);
+            barRight.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            barRight.title = collapsed ? 'Show Analysis (right sidebar)' : 'Hide Analysis (right sidebar)';
+          }
+          triggerResize();
+        }
+
+        if (left) left.addEventListener('click', function () { setLeftCollapsed(true); });
+        if (unfoldLeft) unfoldLeft.addEventListener('click', function () { setLeftCollapsed(false); });
+        if (barLeft) barLeft.addEventListener('click', function () {
+          setLeftCollapsed(!workspace.classList.contains('is-left-collapsed'));
         });
 
-        right.addEventListener('click', function () {
-          var collapsed = workspace.classList.toggle('is-right-collapsed');
-          right.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-          right.title = collapsed ? 'Show analysis' : 'Collapse analysis';
-          if (map) { setTimeout(function () { map.invalidateSize(); }, 220); }
+        if (right) right.addEventListener('click', function () { setRightCollapsed(true); });
+        if (unfoldRight) unfoldRight.addEventListener('click', function () { setRightCollapsed(false); });
+        if (barRight) barRight.addEventListener('click', function () {
+          setRightCollapsed(!workspace.classList.contains('is-right-collapsed'));
+        });
+
+        if (barLeft) barLeft.classList.add('is-active');
+        if (barRight) barRight.classList.add('is-active');
+
+        window.addEventListener('keydown', function (e) {
+          if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
+          if (e.key === '[' || (e.ctrlKey && e.key.toLowerCase() === 'b')) {
+            e.preventDefault();
+            setLeftCollapsed(!workspace.classList.contains('is-left-collapsed'));
+          } else if (e.key === ']') {
+            e.preventDefault();
+            setRightCollapsed(!workspace.classList.contains('is-right-collapsed'));
+          }
         });
       }
 
