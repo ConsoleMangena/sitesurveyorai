@@ -247,6 +247,8 @@ def get_boreholes_endpoint(req: TargetRequest, request: Request):
 
 
 @app.post("/api/minerals", tags=["Geospatial Screening"])
+@app.post("/api/mineralexploration", tags=["Geospatial Screening"], include_in_schema=False)
+@app.post("/api/mineral-exploration", tags=["Geospatial Screening"], include_in_schema=False)
 def get_minerals_endpoint(req: TargetRequest, request: Request):
     """
     Screen shear-zone gold prospectivity, hydrothermal alteration (iron oxide, gossan, hydroxyl),

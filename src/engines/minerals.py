@@ -16,6 +16,7 @@ Evidence layers:
 from __future__ import annotations
 
 import csv
+import gc
 import json
 import os
 import sys
@@ -65,7 +66,8 @@ def run_minerals_survey(
         cfg.set_target_site(target_lat, target_lon, half_deg=half_deg, client=client, address=address)
 
     # Ensure required raw rasters exist for active AOI
-    if not (cfg.RAW / "dem.tif").exists():
+    required_raw = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"]
+    if any(not (cfg.RAW / f).exists() for f in required_raw):
         from src.fetch_data import fetch_all
         fetch_all()
 
@@ -110,6 +112,9 @@ def run_minerals_survey(
     hyd_res = residual_index(raw_hyd, ndvi_arr, deg=2)
     fer_res = residual_index(raw_fer, ndvi_arr, deg=2)
 
+    # Free raw spectral band memory early before heavy overlay
+    del blue, red, nir, swir1, swir2, raw_iron, raw_hyd, raw_fer, ndvi_arr
+
     # 4. Terrain Roughness & Regional Endowment Context
     print("[4/6] Modeling terrain roughness and mineral endowment decay...")
     slope = slope_degrees(dem)
@@ -121,6 +126,7 @@ def run_minerals_survey(
     yy, xx = np.indices((cfg.HEIGHT, cfg.WIDTH))
     dist_gq_km = np.hypot(yy - gq_row, xx - gq_col) * cfg.CELL / 1000.0
     endowment = np.exp(-dist_gq_km / 15.0).astype("float32")  # 15 km decay radius
+    del yy, xx, dist_gq_km
 
     # 5. Multi-criteria Weighted Overlay
     print("[5/6] Multi-criteria weighted prospectivity overlay...")
@@ -144,6 +150,8 @@ def run_minerals_survey(
     )
 
     gold_index = robust_norm(index_raw) * 100.0
+    del index_raw, slope, relief, endowment
+    gc.collect()
 
     water_mask = (lc == 80)
     builtup_mask = (lc == 50)
@@ -297,13 +305,15 @@ def _render_minerals_map(index: np.ndarray, classes: np.ndarray, hs: np.ndarray,
     ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9, fontsize=8)
 
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "mineral_prospectivity_map.png", dpi=cfg.MAP_DPI)
-    plt.close()
+    safe_savefig(fig, cfg.OUT / "mineral_prospectivity_map.png", dpi=cfg.MAP_DPI)
+    plt.close(fig)
+    plt.close("all")
+    gc.collect()
 
 
 def _render_minerals_evidence(lin, inter, iron, hyd, fer, relief, endow):
     """Render diagnostic panel of mineral evidence layers."""
-    fig, axes = plt.subplots(2, 4, figsize=(16, 8), dpi=cfg.MAP_DPI)
+    fig, axes = plt.subplots(2, 4, figsize=(14, 7), dpi=cfg.MAP_DPI)
     panels = [
         ("Lineament Density", lin, "plasma"),
         ("Intersection Density", inter, "magma"),
@@ -323,8 +333,10 @@ def _render_minerals_evidence(lin, inter, iron, hyd, fer, relief, endow):
     axes.flat[7].axis("off")
     plt.suptitle(f"SiteSurveyor AI — Mineral Prospectivity Evidence Layers [{cfg.CLIENT}]", fontsize=13, color=cfg.BRAND_COLOR, y=0.98)
     plt.tight_layout()
-    safe_savefig(plt, cfg.OUT / "mineral_evidence_layers.png", dpi=cfg.MAP_DPI)
-    plt.close()
+    safe_savefig(fig, cfg.OUT / "mineral_evidence_layers.png", dpi=cfg.MAP_DPI)
+    plt.close(fig)
+    plt.close("all")
+    gc.collect()
 
 
 if __name__ == "__main__":

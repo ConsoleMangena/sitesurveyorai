@@ -117,6 +117,13 @@ def main() -> int:
         from src.engines.minerals import run_minerals_survey as survey
     elif category == "soil":
         from src.engines.soil import run_soil_survey as survey
+    elif category == "all":
+        # The endpoint the dashboard actually calls: one process, four engines in a row.
+        from src.config import set_target_site
+        from src.mcp.server import survey_site
+
+        set_target_site(-19.50487490194389, 29.84597927542165)
+        survey = lambda: survey_site(-19.50487490194389, 29.84597927542165, ["all"])
     else:
         raise SystemExit(f"unsupported category {category!r}")
 

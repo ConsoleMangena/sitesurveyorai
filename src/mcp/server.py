@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import gc
 import json
 import os
 import sys
@@ -46,13 +47,15 @@ mcp = MCPServer(
 )
 
 
-def _ensure_data_present():
+def _ensure_data_present(required: list[str] | None = None):
     """Verify that required satellite layers exist; fetch from DE Africa if missing."""
-    required = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif", "wofs.tif", "rain_mean.tif"]
+    if required is None:
+        required = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif", "wofs.tif", "rain_mean.tif"]
     missing = [f for f in required if not (cfg.RAW / f).exists()]
     if missing:
         from src.fetch_data import fetch_all
-        fetch_all()
+        layer_names = [f.replace(".tif", "").replace("_mean", "") for f in missing]
+        fetch_all(layers=layer_names)
 
 
 def _cached_summary(path: Path, latitude: float, longitude: float) -> dict | None:
@@ -142,15 +145,19 @@ def survey_site(
     if run_all or "water" in cats:
         from src.engines.water import run_water_survey
         results["water"] = run_water_survey()
+        gc.collect()
     if run_all or "minerals" in cats:
         from src.engines.minerals import run_minerals_survey
         results["minerals"] = run_minerals_survey()
+        gc.collect()
     if run_all or "soil" in cats:
         from src.engines.soil import run_soil_survey
         results["soil"] = run_soil_survey()
+        gc.collect()
     if run_all or "hazard" in cats:
         from src.engines.hazard import run_hazard_survey
         results["hazard"] = run_hazard_survey()
+        gc.collect()
 
     # Generate or refresh Master Executive Dossier
     from src.report import generate_site_dossier
@@ -280,7 +287,7 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
     cfg.set_target_site(latitude, longitude)
     data = _cached_summary(cfg.OUT / "mineral_summary.json", latitude, longitude)
     if data is None:
-        _ensure_data_present()
+        _ensure_data_present(["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"])
         from src.engines.minerals import run_minerals_survey
         data = run_minerals_survey(latitude, longitude)
 
@@ -297,6 +304,20 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
         "ranked_targets": targets,
         "kmz_mobile_gps_file": str(cfg.OUT / "candidate_mineral_targets.kmz"),
     }
+
+
+@mcp.tool()
+@_single_site
+def mineral_exploration(latitude: float, longitude: float, top_k: int = 5) -> dict:
+    """Screen shear-zone gold prospectivity (alias for get_minerals)."""
+    return get_minerals(latitude=latitude, longitude=longitude, top_k=top_k)
+
+
+@mcp.tool()
+@_single_site
+def mineralexploration(latitude: float, longitude: float, top_k: int = 5) -> dict:
+    """Screen shear-zone gold prospectivity (alias for get_minerals)."""
+    return get_minerals(latitude=latitude, longitude=longitude, top_k=top_k)
 
 
 @mcp.tool()
