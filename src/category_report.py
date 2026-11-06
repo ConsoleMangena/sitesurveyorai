@@ -771,9 +771,16 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
   }
   function clamp() {
     var r = stage.getBoundingClientRect();
-    var w = W * view.scale, h = H * view.scale;
-    view.x = Math.min(r.width * 0.5, Math.max(w * 0.5 - r.width * 0.5, view.x));
-    view.y = Math.min(r.height * 0.5, Math.max(h * 0.5 - r.height * 0.5, view.y));
+    view.x = clampAxis(view.x, W * view.scale, r.width);
+    view.y = clampAxis(view.y, H * view.scale, r.height);
+  }
+  function clampAxis(pos, size, avail) {
+    // Zoomed in, the plate may pan only as far as its own edges: [avail - size, 0].
+    // The old bounds inverted once the image outgrew the stage (min > max), so every
+    // zoom and drag collapsed onto the far edge instead of holding the focal point.
+    // Smaller than the stage, it simply stays centred - there is nothing to pan.
+    if (size <= avail) { return (avail - size) / 2; }
+    return Math.min(0, Math.max(avail - size, pos));
   }
   function center() {
     var r = stage.getBoundingClientRect();
@@ -783,14 +790,14 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
   function setScale(next, anchor) {
     var prev = view.scale;
     view.scale = Math.max(view.fit * 0.5, Math.min(16, next));
-    if (anchor) {
-      var r = stage.getBoundingClientRect();
-      var ax = anchor.x - r.left, ay = anchor.y - r.top;
-      view.x = ax - (ax - view.x) * (view.scale / prev);
-      view.y = ay - (ay - view.y) * (view.scale / prev);
-    }
+    var r = stage.getBoundingClientRect();
+    // The point under the cursor holds still; buttons and keys have no cursor, so they
+    // zoom about the middle of the stage rather than flinging the view back to centre.
+    var ax = anchor ? anchor.x - r.left : r.width / 2;
+    var ay = anchor ? anchor.y - r.top : r.height / 2;
+    view.x = ax - (ax - view.x) * (view.scale / prev);
+    view.y = ay - (ay - view.y) * (view.scale / prev);
     clamp();
-    if (!anchor) { center(); }
     apply();
   }
 
