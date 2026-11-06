@@ -11,7 +11,7 @@ Evidence layers:
   4. Land cover infiltration capacity (ESA WorldCover)  : 0.12
   5. Drainage density (DEM stream networks)             : 0.10
   6. Mean annual rainfall (CHIRPS monthly)              : 0.08
-  7. Vegetation vigor / moisture (Sentinel-2 GeoMAD)    : 0.08
+  7. Vegetation vigor / moisture (Sentinel-2 optical)    : 0.08
 """
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def run_water_survey(
 
     # Ensure required raw rasters exist for active AOI, from the selected coverages
     from src.fetch_data import ensure_raw
-    ensure_raw(["dem.tif"])
+    ensure_raw(["dem.tif", "landcover.tif", "alos.tif", "rain_mean.tif", "optical.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI — Running Category 1: Groundwater Survey [{cfg.AOI_SLUG}]")
@@ -90,8 +90,8 @@ def run_water_survey(
     lc = warp(cfg.RAW / "landcover.tif", 1, resampling=Resampling.nearest)
     alos_hv = warp(cfg.RAW / "alos.tif", 2)
     rain = warp(cfg.RAW / "rain_mean.tif", 1)
-    red = warp(cfg.RAW / "geomad.tif", 3, scale=10000.0)
-    nir = warp(cfg.RAW / "geomad.tif", 7, scale=10000.0)
+    red = warp(cfg.RAW / "optical.tif", "red", scale=10000.0)
+    nir = warp(cfg.RAW / "optical.tif", "nir", scale=10000.0)
 
     # 2. Terrain and hydrological modeling
     print("[2/6] Modeling terrain derivatives, D8 flow, and TWI...")
@@ -364,7 +364,7 @@ def _render_evidence_map(dem, slope, twi_arr, lin, ndvi_arr, rain, infil, drain)
         ("Slope (degrees)", slope, "magma"),
         ("Topographic Wetness (TWI)", twi_arr, "YlGnBu"),
         ("Lineament Density (km/km²)", lin, "plasma"),
-        ("NDVI (Sentinel-2)", ndvi_arr, "YlGn"),
+        ("NDVI (optical composite)", ndvi_arr, "YlGn"),
         ("Rainfall (CHIRPS mm/mo)", rain, "Blues"),
         ("Infiltration Capacity", infil, "YlOrRd"),
         ("Drainage Density (km/km²)", drain, "Blues"),

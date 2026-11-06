@@ -7,9 +7,11 @@ Supports dynamic bounding box and target coordinate context.
 """
 from __future__ import annotations
 
+import calendar
 import os
 import sys
 import time as _time
+import warnings
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -22,6 +24,20 @@ import numpy as np
 import rasterio
 import requests
 from pyproj import Transformer
+from rasterio.warp import Resampling
+
+from src.utils.raster import warp
+
+# The five wavelengths every engine reads, asked for by name on every optical product in the
+# registry, so a Sentinel-2/Landsat swap cannot renumber them underneath an index.
+OPTICAL_BANDS = ("blue", "red", "nir", "swir_1", "swir_2")
+# Sen2Cor scene classification: 4 vegetation, 5 bare soil, 6 water are the classes that
+# describe the ground. 1/2/3/8/9/10 are cloud, shadow, haze and cirrus, and a median taken
+# over them is a median of cloud tops with a confident score printed on it.
+CLEAR_SCL = (4, 5, 6)
+COMPOSITE_SCENES = 4          # enough to average out haze, cheap enough for the 512 MB tier
+MAX_SCENE_ATTEMPTS = 12       # a wet season may need many tries before four clear scenes
+MIN_CLEAR_FRACTION = 0.25     # a scene cloudier than this adds more cloud than evidence
 
 
 def _xy_bbox(bbox: tuple[float, float, float, float], target_crs: str = "EPSG:6933") -> tuple[float, float, float, float]:
@@ -41,7 +57,8 @@ def _xy_bbox(bbox: tuple[float, float, float, float], target_crs: str = "EPSG:69
 
 
 def _url(coverage: str, bbox: tuple[float, float, float, float], stamp: str | None = None,
-         projected: bool = False, target_crs: str = "EPSG:6933") -> str:
+         projected: bool = False, target_crs: str = "EPSG:6933",
+         bands: list[str] | tuple[str, ...] | None = None) -> str:
     """Build WCS GetCoverage request URL."""
     params = [
         "service=WCS",
@@ -59,6 +76,12 @@ def _url(coverage: str, bbox: tuple[float, float, float, float], stamp: str | No
         ]
     if stamp:
         params.append(f'subset=time(%22{stamp}%22)')
+    if bands:
+        # Asking for the bands by name is the whole point: the response order follows the
+        # request, so a product with a different band layout cannot slide a different
+        # wavelength into the vegetation maths. It also cuts a 14-band mosaic to 5 bands.
+        from urllib.parse import quote
+        params.append(f"rangesubset={quote(','.join(bands))}")
     params.append("format=image/geotiff")
     return f"{cfg.WCS_URL}?{'&'.join(params)}"
 
@@ -147,6 +170,17 @@ def fetch(name: str, coverage: str, stamp: str | None = None, projected: bool = 
 
 def provenance(name: str) -> str:
     """The coverageid the cached layer on disk was actually downloaded from."""
+    detail = provenance_detail(name)
+    if detail:
+        return detail.split()[0]
+    for spec in cfg.DATA_SOURCES.values():
+        if spec["layer"] == name:
+            return spec["default"]
+    return ""
+
+
+def provenance_detail(name: str) -> str:
+    """The full sidecar record: coverage, and for the optical layer its year and window too."""
     src = cfg.RAW / f"{name}.src"
     if src.exists():
         try:
@@ -159,6 +193,178 @@ def provenance(name: str) -> str:
     return ""
 
 
+def _window_range(year: int, window: str) -> tuple[str, str]:
+    """ISO interval for a composite window, crossing the new year when the season does.
+
+    A southern wet season labelled 2023 is Nov-Dec 2023 plus Jan-Apr 2024; treating it as a
+    single calendar year would quietly composite this side's dry months and call them wet.
+    """
+    months = cfg.composite_months(window)
+    prev = 0
+    offset = 0
+    spans = []
+    for month in months:
+        if month < prev:
+            offset += 1     # the wrap is sticky: every later month stays in the next year
+        prev = month
+        spans.append((year + offset, month))
+    start = f"{spans[0][0]}-{spans[0][1]:02d}-01T00:00:00Z"
+    y, m = spans[-1]
+    end = f"{y}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}T23:59:59Z"
+    return start, end
+
+
+def _l2a_scenes(year: int, window: str) -> list[tuple[str, float]]:
+    """Scene dates in the window, least cloudy first, from the STAC catalogue."""
+    start, end = _window_range(year, window)
+    payload = {
+        "collections": ["s2_l2a"],
+        "bbox": list(cfg.BBOX_WGS84),
+        "datetime": f"{start}/{end}",
+        "limit": 200,
+        "fields": {"include": ["properties.datetime", "properties.eo:cloud_cover"], "exclude": []},
+    }
+    r = requests.post(cfg.STAC_URL, json=payload, timeout=90)
+    r.raise_for_status()
+    items = r.json().get("features", [])
+    by_date: dict[str, float] = {}
+    for item in items:
+        props = item.get("properties", {})
+        stamp = props.get("datetime") or ""
+        if not stamp:
+            continue
+        cloud = props.get("eo:cloud_cover")
+        cloud = float(cloud) if cloud is not None else 100.0
+        # A date can return one item per intersecting tile, each with its own cloud figure;
+        # keep the worst, since the whole AOI has to be clear, not just one tile of it.
+        date = stamp[:10]
+        by_date[date] = max(by_date.get(date, 0.0), cloud)
+    return sorted(by_date.items(), key=lambda kv: kv[1])
+
+
+def _composite_l2a(out: Path, sidecar: Path, wanted: str) -> Path | None:
+    """Median of the clear pixels in up to COMPOSITE_SCENES L2A scenes of the chosen window.
+
+    WCS serves L2A one instant at a time, so the composite is built here. Each scene is
+    folded onto the analysis grid and deleted before the next is fetched: four 45 MB scenes
+    held at once would be a memory problem on the 512 MB tier, four 3 MB grids are not.
+    """
+    year = int(cfg.ACTIVE_COMPOSITE["year"])
+    window = str(cfg.ACTIVE_COMPOSITE["window"])
+    scenes = _l2a_scenes(year, window)
+    if not scenes:
+        raise RuntimeError(
+            f"The DE Africa catalogue lists no Sentinel-2 L2A scene over this site for "
+            f"{window} {year}. Try the other season, another year, or the annual GeoMAD composite."
+        )
+    stacks: dict[str, list[np.ndarray]] = {b: [] for b in OPTICAL_BANDS}
+    used: list[str] = []
+    tmp = cfg.RAW / ".optical_scene.tif"
+
+    for date, cloud in scenes[:MAX_SCENE_ATTEMPTS]:
+        if len(used) >= COMPOSITE_SCENES:
+            break
+        url = _url("s2_l2a", cfg.BBOX_WGS84, f"{date}T00:00:00.000Z", projected=True,
+                   bands=list(OPTICAL_BANDS) + ["mask"])
+        if not _download(url, tmp, retries=1, optional=True):
+            continue
+        try:
+            clear = np.isin(warp(tmp, "mask", resampling=Resampling.nearest), CLEAR_SCL)
+            fraction = float(clear.mean())
+            if fraction < MIN_CLEAR_FRACTION:
+                print(f"[composite] {date}: only {fraction:.0%} clear ground, not using it")
+                continue
+            for band in OPTICAL_BANDS:
+                a = warp(tmp, band)
+                a[~clear] = np.nan
+                stacks[band].append(a)
+            used.append(date)
+            print(f"[composite] {date}: {fraction:.0%} clear ground, scene {len(used)}")
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    if not used:
+        raise RuntimeError(
+            f"No usable Sentinel-2 L2A scene for {window} {year}: the dates in that window "
+            "either have no coverage or were mostly cloud. Try the other season, another "
+            "year, or the annual GeoMAD composite."
+        )
+
+    bands = []
+    for band in OPTICAL_BANDS:
+        stack = np.stack(stacks[band])
+        del stacks[band]
+        # A cell no clear scene covers is this AOI's nodata, which nanmedian reports as an
+        # all-NaN slice; the warning would bury the fetch log under cells that are meant to be empty.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            a = np.nanmedian(stack, axis=0).astype("float32")
+        bands.append(np.nan_to_num(a, nan=0.0))
+
+    with rasterio.open(
+        out, "w", driver="GTiff", height=cfg.HEIGHT, width=cfg.WIDTH,
+        count=len(OPTICAL_BANDS), dtype="float32", crs=cfg.LOCAL_CRS,
+        transform=cfg.TRANSFORM, nodata=0.0,
+    ) as dst:
+        for i, band in enumerate(OPTICAL_BANDS, start=1):
+            dst.write(bands[i - 1], i)
+            dst.set_band_description(i, band)
+    sidecar.write_text(wanted, encoding="utf-8")
+    (cfg.RAW / "optical.scenes").write_text(
+        "\n".join(used) + "\n", encoding="utf-8"
+    )
+    print(f"[ok] optical      median of {len(used)} clear scenes ({', '.join(used)}), "
+          f"{len(OPTICAL_BANDS)} named bands")
+    return out
+
+
+def fetch_optical(cache: bool = True) -> Path | None:
+    """Fetch the optical layer this run selected, as five named bands on one file.
+
+    GeoMAD comes down as-is; L2A is composited over the selected window. Both leave the
+    same file contract behind, so no engine needs to know which one produced it.
+    """
+    out = cfg.RAW / "optical.tif"
+    sidecar = cfg.RAW / "optical.src"
+    wanted = cfg.composite_signature()
+
+    if cache and out.exists() and out.stat().st_size > 0:
+        if provenance_detail("optical") != wanted:
+            print(f"[cache] optical      cached from '{provenance_detail('optical')}', "
+                  f"not '{wanted}' - re-fetching")
+        else:
+            with rasterio.open(out) as ds:
+                if ds.width > 0 and set(OPTICAL_BANDS).issubset(set(ds.descriptions or ())):
+                    print(f"[cache] optical      {cfg.composite_label(wanted)} "
+                          f"({out.stat().st_size / (1024 * 1024):.1f} MB)")
+                    return out
+            print("[cache] optical      file unreadable or missing named bands, re-fetching")
+
+    if cfg.ACTIVE_SOURCES["optical"] == "s2_l2a":
+        return _composite_l2a(out, sidecar, wanted)
+
+    # Every other optical source in the registry is a GeoMAD mosaic: one median per year, the
+    # same five band names, the same scaling, so one code path serves Sentinel-2 and Landsat.
+    coverage = cfg.ACTIVE_SOURCES["optical"]
+    stamp = f"{cfg.ACTIVE_COMPOSITE['year']}-01-01T00:00:00.000Z"
+    url = _url(coverage, cfg.BBOX_WGS84, stamp, projected=True, bands=list(OPTICAL_BANDS))
+    if _download(url, out):
+        sidecar.write_text(wanted, encoding="utf-8")
+        (cfg.RAW / "optical.scenes").write_text("", encoding="utf-8")
+        return out
+    return None
+
+
+def scenes_used() -> list[str]:
+    """The L2A scene dates the current optical composite was built from, if any."""
+    p = cfg.RAW / "optical.scenes"
+    try:
+        return [line.strip() for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except OSError:
+        return []
+
+
+
 def used_sources() -> dict:
     """Name the coverages the rasters on disk came from, for anywhere that discloses inputs.
 
@@ -169,7 +375,20 @@ def used_sources() -> dict:
     selectable = {}
     for key, spec in cfg.DATA_SOURCES.items():
         coverage = provenance(spec["layer"]) or cfg.ACTIVE_SOURCES[key]
-        selectable[key] = {"coverage": coverage, "label": spec["options"].get(coverage, coverage)}
+        label = spec["options"].get(coverage, coverage)
+        if key == "optical":
+            detail = provenance_detail("optical")
+            if len(detail.split()) == 3:
+                label = cfg.composite_label(detail)
+        entry = {"coverage": coverage, "label": label}
+        if key == "optical":
+            # The agency behind the pixels, carried with the entry so a dossier credits Landsat
+            # for a Landsat median instead of assuming Copernicus produced every optical run.
+            entry["credit"] = cfg.optical_credit(coverage)
+            scenes = scenes_used()
+            if scenes:
+                entry["scenes"] = scenes
+        selectable[key] = entry
     return {"selectable": selectable, "fixed": dict(cfg.FIXED_SOURCES)}
 
 
@@ -178,7 +397,14 @@ def stale_layers() -> list[str]:
     stale = []
     for key, spec in cfg.DATA_SOURCES.items():
         name = spec["layer"]
-        if (cfg.RAW / f"{name}.tif").exists() and provenance(name) != cfg.ACTIVE_SOURCES[key]:
+        if not (cfg.RAW / f"{name}.tif").exists():
+            continue
+        # Optical has to match the window as well as the product: a 2023 annual median and a
+        # 2024 dry season are both "Sentinel-2" and both perfectly valid, just not for this run.
+        if key == "optical":
+            if provenance_detail(name) != cfg.composite_signature():
+                stale.append(name)
+        elif provenance(name) != cfg.ACTIVE_SOURCES[key]:
             stale.append(name)
     return stale
 
@@ -242,9 +468,10 @@ def fetch_all(
     if want is None or "wofs" in want:
         results["wofs"] = fetch("wofs", "wofs_ls_summary_alltime", projected=True, cache=use_cache)
 
-    # 5. Sentinel-2 Annual GeoMAD 2023
-    if want is None or "geomad" in want:
-        results["geomad"] = fetch("geomad", "gm_s2_annual", "2023-01-01T00:00:00.000Z", projected=True, cache=use_cache)
+    # 5. Optical surface reflectance (selectable: a Sentinel-2 or Landsat annual GeoMAD median,
+    #    or a Sentinel-2 L2A composite of clear scenes over the chosen year and season)
+    if want is None or "optical" in want or "geomad" in want:
+        results["optical"] = fetch_optical(cache=use_cache)
 
     # 6. CHIRPS Monthly Rainfall (2023-2024 sample)
     if want is None or "rain" in want or "rain_mean" in want:

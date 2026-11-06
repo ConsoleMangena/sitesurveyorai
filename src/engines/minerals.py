@@ -67,7 +67,7 @@ def run_minerals_survey(
 
     # Ensure required raw rasters exist for active AOI, from the selected coverages
     from src.fetch_data import ensure_raw
-    ensure_raw(["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"])
+    ensure_raw(["dem.tif", "landcover.tif", "alos.tif", "optical.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI — Running Category 2: Mineral Prospectivity Survey [{cfg.AOI_SLUG}]")
@@ -80,12 +80,12 @@ def run_minerals_survey(
     lc = warp(cfg.RAW / "landcover.tif", 1, resampling=Resampling.nearest)
     alos_hv = warp(cfg.RAW / "alos.tif", 2)
 
-    # Sentinel-2 bands for alteration
-    blue = warp(cfg.RAW / "geomad.tif", 1, scale=10000.0)
-    red = warp(cfg.RAW / "geomad.tif", 3, scale=10000.0)
-    nir = warp(cfg.RAW / "geomad.tif", 7, scale=10000.0)
-    swir1 = warp(cfg.RAW / "geomad.tif", 9, scale=10000.0)
-    swir2 = warp(cfg.RAW / "geomad.tif", 10, scale=10000.0)
+    # Sentinel-2 bands for alteration, addressed by name
+    blue = warp(cfg.RAW / "optical.tif", "blue", scale=10000.0)
+    red = warp(cfg.RAW / "optical.tif", "red", scale=10000.0)
+    nir = warp(cfg.RAW / "optical.tif", "nir", scale=10000.0)
+    swir1 = warp(cfg.RAW / "optical.tif", "swir_1", scale=10000.0)
+    swir2 = warp(cfg.RAW / "optical.tif", "swir_2", scale=10000.0)
 
     # 2. Structural Lineament & Intersection Analysis
     print("[2/6] Extracting structural lineaments and intersection nodes...")

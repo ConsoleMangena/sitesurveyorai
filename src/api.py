@@ -81,6 +81,15 @@ class SurveyRequest(BaseModel):
                     "use their default; GET /api/data_sources lists what is selectable and what "
                     "each option means.",
     )
+    composite: dict[str, Any] | None = Field(
+        default=None,
+        description='Optical composite window, e.g. {"year": 2024, "window": "dry"}. "window" is '
+                    "annual, dry or wet, and a season needs the Sentinel-2 L2A source. Years are "
+                    "per coverage -- each optical product publishes its own span, listed by "
+                    "GET /api/data_sources -- and one outside it is rejected rather than silently "
+                    "replaced. Seasons follow the site's hemisphere. Omit for the calibrated 2023 "
+                    "annual composite.",
+    )
     half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
     async_mode: bool = Field(
         default=False,
@@ -96,6 +105,10 @@ class TargetRequest(BaseModel):
     data_sources: dict[str, str] = Field(
         default={},
         description="Selectable input coverages for this run, as for /api/survey.",
+    )
+    composite: dict[str, Any] | None = Field(
+        default=None,
+        description="Optical composite window for this run, as for /api/survey.",
     )
     half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
 
@@ -379,6 +392,26 @@ def _check_data_sources(sources: dict[str, str]) -> dict[str, str]:
         ) from exc
 
 
+def _check_composite(composite: dict[str, Any] | None,
+                     sources: dict[str, str]) -> dict[str, Any]:
+    """Validate the composite window against the optical source that has to serve it.
+
+    A season asked of GeoMAD, or a year no product publishes, would otherwise reach the
+    fetcher as a stamp it cannot resolve -- and a silent fallback to the default window
+    would report a full-year median under a label claiming the dry season.
+    """
+    try:
+        return cfg.check_composite(composite, sources)
+    except ValueError as exc:
+        raise _api_error(
+            400,
+            "invalid_composite",
+            str(exc),
+            "GET /api/data_sources returns the composite years and windows, and which optical "
+            "sources accept a season.",
+        ) from exc
+
+
 def _data_sources_payload() -> dict[str, Any]:
     """The registry and the live selection in the shape the sandbox renders selects from."""
     active = dict(cfg.ACTIVE_SOURCES)
@@ -395,6 +428,20 @@ def _data_sources_payload() -> dict[str, Any]:
             for key, spec in cfg.DATA_SOURCES.items()
         ],
         "fixed": dict(cfg.FIXED_SOURCES),
+        "composite": {
+            # Per product, not global: the sandbox rebuilds both selects when the optical source
+            # changes, so a caller can never submit a year the chosen coverage would 404 on.
+            "serves": {
+                cid: {"years": cfg.optical_years(cid), "windows": list(p["windows"]),
+                      "family": p["family"]}
+                for cid, p in cfg.OPTICAL_PRODUCTS.items()
+            },
+            "windows": [{"id": wid, "label": label} for wid, label in cfg.COMPOSITE_WINDOWS.items()],
+            "active": dict(cfg.ACTIVE_COMPOSITE),
+            "active_source": cfg.ACTIVE_SOURCES["optical"],
+            "default": dict(cfg.DEFAULT_COMPOSITE),
+            "label": cfg.composite_label(cfg.composite_signature()),
+        },
         "note": "Only coverages the engine can swap without changing what a score means are "
                 "selectable. The rest are listed so a report can say what produced the numbers.",
     }
@@ -473,6 +520,11 @@ def _storage_report() -> dict:
         "active_aoi": cfg.AOI_SLUG,
         "active_client": cfg.CLIENT,
         "active_sources": cfg.source_labels(),
+        # Structured rather than one label: active_sources already names the optical product,
+        # so a caller appends the year and window beside it without printing the product twice.
+        "active_composite": {**dict(cfg.ACTIVE_COMPOSITE),
+                             "window_label": cfg.COMPOSITE_WINDOWS[cfg.ACTIVE_COMPOSITE["window"]],
+                             "label": cfg.composite_label(cfg.composite_signature())},
         "state_dir_persistent": cfg.STATE_DIR != cfg.ROOT,
     }
 
@@ -509,9 +561,10 @@ def _clear_dir(path: Path) -> tuple[int, int, list[str]]:
 def _run_survey(payload: dict, base_url: str) -> dict:
     """Configure the AOI and run every requested category under the single-site lock.
 
-    ``set_target_site`` and ``set_data_sources`` mutate module globals that the engines read,
-    so they have to happen inside the lock. Doing it in the request handler (before acquiring)
-    let a second caller re-point an in-flight survey at a different AOI mid-run.
+    ``set_target_site``, ``set_data_sources`` and ``set_composite`` mutate module globals that
+    the engines read, so they have to happen inside the lock. Doing it in the request handler
+    (before acquiring) let a second caller re-point an in-flight survey at a different AOI
+    mid-run.
     """
     lat, lon, half_deg = payload["latitude"], payload["longitude"], payload["half_deg"]
     with _SITE_LOCK:
@@ -522,7 +575,8 @@ def _run_survey(payload: dict, base_url: str) -> dict:
             client=payload["client_name"],
             address=payload["address"] or None,
         )
-        cfg.set_data_sources(payload.get("data_sources"))
+        sources = cfg.set_data_sources(payload.get("data_sources"))
+        cfg.set_composite(payload.get("composite"), sources)
         result = _mcp_survey_site(
             latitude=lat,
             longitude=lon,
@@ -689,12 +743,18 @@ def _targeted(req: TargetRequest, run) -> dict:
     """Run a single-category tool with the AOI and inputs configured inside the lock."""
     _check_coverage(req.latitude, req.longitude)
     sources = _check_data_sources(req.data_sources)
+    composite = _check_composite(req.composite, sources)
     request_id = _request_id()
     try:
         with _SITE_LOCK:
             cfg.set_target_site(req.latitude, req.longitude, half_deg=req.half_deg)
             cfg.set_data_sources(sources)
-            return run()
+            cfg.set_composite(composite, sources)
+            data = run()
+            # Read back inside the lock, from the sidecars this run left: a category endpoint
+            # that reported no inputs would let a reader assume the defaults it did not use.
+            data["data_sources"] = fetch_data.used_sources()
+            return data
     except Exception as exc:
         raise _internal_error(exc, request_id) from exc
 
@@ -811,6 +871,7 @@ def run_survey_endpoint(req: SurveyRequest, request: Request):
     """
     _check_coverage(req.latitude, req.longitude)
 
+    sources = _check_data_sources(req.data_sources)
     payload = {
         "latitude": req.latitude,
         "longitude": req.longitude,
@@ -818,7 +879,8 @@ def run_survey_endpoint(req: SurveyRequest, request: Request):
         "categories": [c.lower().strip() for c in req.categories] or ["all"],
         "client_name": req.client_name.strip() or "Client",
         "address": (req.address or "").strip(),
-        "data_sources": _check_data_sources(req.data_sources),
+        "data_sources": sources,
+        "composite": _check_composite(req.composite, sources),
     }
     base_url = str(request.base_url).rstrip("/")
 

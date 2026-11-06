@@ -372,9 +372,23 @@ def _build_html_report(dossier: dict) -> str:
     # a dossier that names Copernicus DEM while the scores came from SRTM is a false
     # attribution on a document someone signs off on.
     used_sources = fetch_data.used_sources()
+    selectable = used_sources["selectable"]
+    # The optical layer is credited by its product family in the sentence below, so it leaves
+    # the swappable list: "Copernicus Sentinel-2 and Sentinel-2 L2A ..." reads as two datasets.
+    # What the optical pixels aggregate over is its own clause, because that is what makes two
+    # dossiers comparable -- and a scene list is the only record of which passes were used.
     dea_credit = ", ".join(_escape(v["label"]) + " (CC BY 4.0)"
-                           for v in used_sources["selectable"].values())
+                           for key, v in selectable.items() if key != "optical")
     and_credit = f" and {dea_credit}" if dea_credit else ""
+    optical = selectable["optical"]
+    optical_credit = _escape(optical["credit"])
+    scenes = optical.get("scenes") or []
+    optical_clause = ""
+    if optical.get("label"):
+        scene_note = (f", composited from {len(scenes)} clear scenes "
+                      f"({_escape(', '.join(scenes))})") if scenes else ""
+        optical_clause = (f" <strong>Optical input:</strong> {_escape(optical['label'])}"
+                          f"{scene_note}.")
 
     # Coordinates are generated from the survey output instead of hardcoding each #1 pick.
     # A client acting on one point has no fallback if that spot is already spoken for, and
@@ -944,11 +958,12 @@ def _build_html_report(dossier: dict) -> str:
 
     <!-- Data attribution -->
     <div class="attribution">
-      <strong>Data attribution:</strong> Copernicus Sentinel-2{and_credit} via
+      <strong>Data attribution:</strong> {optical_credit}{and_credit} via
       Digital Earth Africa; JAXA ALOS PALSAR mosaic
-      (&copy; JAXA/METI); Landsat imagery courtesy of USGS/NASA; CHIRPS precipitation courtesy
+      (&copy; JAXA/METI); the Landsat-derived water and fractional-cover layers courtesy of
+      USGS/NASA; CHIRPS precipitation courtesy
       of the Climate Hazards Center, UC Santa Barbara. Screening output produced by
-      SiteSurveyor AI &mdash; Eineva Labs.
+      SiteSurveyor AI &mdash; Eineva Labs.{optical_clause}
     </div>
 
     <!-- Regulatory / Engineering Disclaimer -->

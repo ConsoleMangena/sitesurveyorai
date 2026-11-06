@@ -1668,6 +1668,22 @@ def _pct(pct: float) -> str:
     return f"{pct:.1f}%"
 
 
+def _inputs_line(used: dict) -> str:
+    """The selectable labels joined, plus the scene dates when a composite had any.
+
+    A seasonal composite is a choice of passes, not just of product: two reports can print the
+    same input line and still be built from different acquisitions, and the dates are the only
+    record that tells them apart.
+    """
+    selectable = used.get("selectable", {})
+    parts = [v["label"] for v in selectable.values()]
+    scenes = (selectable.get("optical") or {}).get("scenes") or []
+    line = " · ".join(parts)
+    if scenes:
+        line += " · scenes " + ", ".join(scenes)
+    return line
+
+
 def _sources_note(used: dict) -> str:
     """What the rasters on disk for this survey area actually came from.
 
@@ -1676,10 +1692,10 @@ def _sources_note(used: dict) -> str:
     numbers came from the one already on disk.
     """
     parts = []
-    chosen = [v["label"] for v in used.get("selectable", {}).values()]
+    chosen = _inputs_line(used)
     fixed = list(used.get("fixed", {}).values())
     if chosen:
-        parts.append("<strong>Chosen for this run:</strong> " + _e(" · ".join(chosen)))
+        parts.append("<strong>Chosen for this run:</strong> " + _e(chosen))
     if fixed:
         parts.append("<strong>Fixed inputs:</strong> " + _e(" · ".join(fixed)))
     if not parts:
@@ -1689,14 +1705,21 @@ def _sources_note(used: dict) -> str:
 
 
 def _attribution_block(used: dict) -> str:
-    """Provider credit, with the swappable layers named as this run recorded them."""
-    named = ", ".join(v["label"] + " (CC BY 4.0)" for v in used.get("selectable", {}).values())
-    lead = (f"Copernicus Sentinel-2 and {named} via Digital Earth Africa" if named
-            else "Copernicus Sentinel-2 via Digital Earth Africa")
+    """Provider credit, with the swappable layers named as this run recorded them.
+
+    The optical layer stays out of the list: the sentence already credits the agency behind
+    those pixels, and appending its composite label would read as a second dataset.
+    """
+    selectable = used.get("selectable", {})
+    credit = selectable["optical"]["credit"]
+    named = ", ".join(v["label"] + " (CC BY 4.0)"
+                      for key, v in selectable.items() if key != "optical")
+    lead = f"{credit} and {named}" if named else credit
     return (
         '<div class="attribution"><strong>Data attribution:</strong> '
-        f"{lead}; JAXA ALOS PALSAR mosaic (&copy; JAXA/METI); Landsat imagery courtesy of "
-        "USGS/NASA; CHIRPS precipitation courtesy of the Climate Hazards Center, UC Santa Barbara.</div>"
+        f"{lead} via Digital Earth Africa; JAXA ALOS PALSAR mosaic (&copy; JAXA/METI); "
+        "the Landsat-derived water and fractional-cover layers courtesy of USGS/NASA; "
+        "CHIRPS precipitation courtesy of the Climate Hazards Center, UC Santa Barbara.</div>"
     )
 
 
@@ -2050,7 +2073,7 @@ def build_viewer_html(cat: Category, dec: dict, files: dict, data: dict | None) 
         return f"./{path.name}" if path else "#"
 
     html = VIEWER_TEMPLATE
-    chosen = " · ".join(v["label"] for v in fetch_data.used_sources()["selectable"].values())
+    chosen = _inputs_line(fetch_data.used_sources())
     filled = {
         "{{NAME}}": _e(cat.name),
         "{{CLIENT}}": _e(str(identity["client"] or cfg.DEFAULT_CLIENT)),
@@ -2066,7 +2089,7 @@ def build_viewer_html(cat: Category, dec: dict, files: dict, data: dict | None) 
         "{{CRS_LABEL}}": f"EPSG:{dec['epsg']}" if dec["epsg"] else "local grid",
         "{{EXTENT}}": f"{xmin:.0f}–{xmax:.0f} E · {ymin:.0f}–{ymax:.0f} N",
         "{{NODATA_SHARE}}": f"{nodata['pct']:.1f}% of cells" if nodata else "none",
-        "{{SOURCES}}": _e(" · ".join(v["label"] for v in fetch_data.used_sources()["selectable"].values())) or "engine defaults",
+        "{{SOURCES}}": _e(chosen) or "engine defaults",
         "{{INDEX_LABEL}}": _e(cat.index_label),
         "{{CAND_NOUN}}": _e(cat.candidate_noun),
         "{{TIFF_HREF}}": f"./{cat.zones_tif}",

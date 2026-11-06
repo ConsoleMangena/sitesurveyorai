@@ -72,7 +72,8 @@ def run_hazard_survey(
 
     # Ensure required raw rasters exist for active AOI, from the selected coverages
     from src.fetch_data import ensure_raw
-    ensure_raw(["dem.tif"])
+    ensure_raw(["dem.tif", "landcover.tif", "rain_mean.tif", "optical.tif",
+                "wofs.tif", "fc_ls_2023.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI -- Running Category 5: Hazard & Risk Survey [{cfg.AOI_SLUG}]")
@@ -90,11 +91,11 @@ def run_hazard_survey(
     # WOfS: Band 3 is water inundation frequency (0.0 to 1.0)
     wofs_freq = warp(cfg.RAW / "wofs.tif", 3)
 
-    # Sentinel-2 GeoMAD
-    red = warp(cfg.RAW / "geomad.tif", 3, scale=10000.0)
-    nir = warp(cfg.RAW / "geomad.tif", 7, scale=10000.0)
-    swir1 = warp(cfg.RAW / "geomad.tif", 9, scale=10000.0)
-    swir2 = warp(cfg.RAW / "geomad.tif", 10, scale=10000.0)
+    # Sentinel-2 reflectance, addressed by band name
+    red = warp(cfg.RAW / "optical.tif", "red", scale=10000.0)
+    nir = warp(cfg.RAW / "optical.tif", "nir", scale=10000.0)
+    swir1 = warp(cfg.RAW / "optical.tif", "swir_1", scale=10000.0)
+    swir2 = warp(cfg.RAW / "optical.tif", "swir_2", scale=10000.0)
 
     # DE Africa Fractional Cover: band 6 = npv_pc_90, band 8 = bs_pc_50
     # (verified order: pv 10/50/90, npv 10/50/90, bs 10/50/90, count_valid)
@@ -430,8 +431,8 @@ def _plot_hazard_evidence(flood, slope, erosion, fire, drought):
         "- Slope Failure: Copernicus 30m DEM\n"
         "  gradient (>15 deg critical threshold).\n\n"
         "- Erosion: Slope x bare-soil index (BSI).\n\n"
-        "- Wildfire: Sentinel-2 high fuel (NDVI)\n"
-        "  coupled with dry moisture stress (NDMI).\n\n"
+        "- Wildfire: high fuel (NDVI) coupled\n"
+        "  with dry moisture stress (NDMI).\n\n"
         "- Drought: CHIRPS long-term rainfall deficit\n"
         "  and vegetative exposure."
     )

@@ -70,7 +70,7 @@ def _candidate_lists(dossier: dict, limit: int = 6) -> dict[str, list]:
 def _ensure_data_present(required: list[str] | None = None):
     """Verify that required satellite layers exist; fetch from DE Africa if missing."""
     if required is None:
-        required = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif", "wofs.tif", "rain_mean.tif"]
+        required = ["dem.tif", "landcover.tif", "alos.tif", "optical.tif", "wofs.tif", "rain_mean.tif"]
     from src.fetch_data import ensure_raw
     ensure_raw(required)
 
@@ -371,7 +371,7 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
     cfg.set_target_site(latitude, longitude)
     data = _cached_summary(cfg.OUT / "mineral_summary.json", latitude, longitude)
     if data is None:
-        _ensure_data_present(["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"])
+        _ensure_data_present(["dem.tif", "landcover.tif", "alos.tif", "optical.tif"])
         from src.engines.minerals import run_minerals_survey
         data = run_minerals_survey(latitude, longitude)
 

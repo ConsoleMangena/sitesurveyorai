@@ -25,7 +25,7 @@ import src.config as cfg
 
 def check_data_present() -> bool:
     """Check if minimum required satellite layers exist in active AOI raw data dir."""
-    required = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif", "wofs.tif", "rain_mean.tif"]
+    required = ["dem.tif", "landcover.tif", "alos.tif", "optical.tif", "wofs.tif", "rain_mean.tif"]
     missing = [f for f in required if not (cfg.RAW / f).exists()]
     return len(missing) == 0
 

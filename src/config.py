@@ -42,6 +42,10 @@ for d in (RAW_BASE, EXTERNAL, OUT):
 
 # --- API ---
 WCS_URL = "https://ows.digitalearth.africa/wcs"
+# The catalogue is what tells us which Sentinel-2 scenes exist in a season and how cloudy
+# each one is; WCS then delivers the pixels. Without it a composite would be built by
+# guessing dates and counting 404s.
+STAC_URL = "https://explorer.digitalearth.africa/stac/search"
 API_KEY = (
     os.getenv("DEAFRICA_SANDBOX_API_KEY")
     or os.getenv("DE_AFRICA_TOKEN")
@@ -113,11 +117,60 @@ HAZARD_WEIGHTS = {
 }
 
 # --- Selectable Input Sources ---
-# Only layers whose alternative Digital Earth Africa coverages are interchangeable at the
-# engine level: one band, same units, same class scheme. GeoMAD is deliberately absent -
-# gm_s2_annual carries 14 bands and gm_ls8_annual / gm_ls8_ls9_annual carry 10, while the
-# engines read bands by position (1, 3, 7, 9, 10), so switching it would feed smad, bcmad
-# and count into the vegetation maths and still return a confident-looking 0-100 score.
+# Elevation and land cover qualify because their alternative coverages are interchangeable at
+# the engine level: one band, same units, same class scheme. Optical qualifies on one condition
+# only -- the fetch asks WCS for the five analysis bands BY NAME, so a product swap cannot
+# renumber them. That condition is what lets Landsat in alongside Sentinel-2: both publish the
+# five bands the engines read, at reflectance x10000 on the same 30 m analysis grid, and none of
+# them reads a red-edge band, so Landsat's narrower layout scores the same part of the spectrum.
+# What each optical product publishes at this survey area: the year stamps that return pixels,
+# the windows that can be built from it, and the agency the pixels belong to. The spans were read
+# off the live service rather than a product page, because a year a coverage does not answer for
+# is a 404 in the middle of a survey. One source of truth: the registry options are derived from
+# this table, so an entry here is an option and the two cannot drift.
+OPTICAL_PRODUCTS: dict[str, dict] = {
+    "gm_s2_annual": {
+        "label": "Sentinel-2 Annual GeoMAD (median composite)",
+        "years": (2019, 2025),
+        "windows": ("annual",),
+        "credit": "Copernicus Sentinel-2",
+        "family": "Sentinel-2",
+    },
+    # Not a mosaic: the fetch pulls the clearest scenes inside the window from the catalogue and
+    # medians them itself, which is what makes a season available at all.
+    "s2_l2a": {
+        "label": "Sentinel-2 L2A (clear-scene composite)",
+        "years": (2019, 2025),
+        "windows": ("annual", "dry", "wet"),
+        "credit": "Copernicus Sentinel-2",
+        "family": "Sentinel-2",
+    },
+    # Three generations of Landsat, and each answers for a different span of years: 2015 is a
+    # valid stamp for Landsat 8 and a 404 for Landsat 5-7, so the year control has to follow the
+    # coverage rather than offer the union of all of them.
+    "gm_ls8_ls9_annual": {
+        "label": "Landsat 8-9 Annual GeoMAD (median composite)",
+        "years": (2021, 2025),
+        "windows": ("annual",),
+        "credit": "USGS/NASA Landsat",
+        "family": "Landsat",
+    },
+    "gm_ls8_annual": {
+        "label": "Landsat 8 Annual GeoMAD (median composite)",
+        "years": (2013, 2020),
+        "windows": ("annual",),
+        "credit": "USGS/NASA Landsat",
+        "family": "Landsat",
+    },
+    "gm_ls5_ls7_annual": {
+        "label": "Landsat 5-7 Annual GeoMAD (median composite)",
+        "years": (1984, 2012),
+        "windows": ("annual",),
+        "credit": "USGS/NASA Landsat",
+        "family": "Landsat",
+    },
+}
+
 DATA_SOURCES: dict[str, dict] = {
     "dem": {
         "label": "Elevation model",
@@ -138,18 +191,38 @@ DATA_SOURCES: dict[str, dict] = {
             "esa_worldcover_2020": "ESA WorldCover 2020",
         },
     },
+    # The menu is the product table, so the sandbox can never offer a coverage the composite
+    # controls have no serving entry for. Sentinel-2 first because the model is calibrated on it.
+    "optical": {
+        "label": "Optical source",
+        "layer": "optical",
+        "default": "gm_s2_annual",
+        "options": {cid: p["label"] for cid, p in OPTICAL_PRODUCTS.items()},
+    },
 }
+
+# The window the optical layer aggregates over. Both settings belong to the chosen coverage, not
+# to the engine: Landsat 5-7 stops where Sentinel-2 starts, and a GeoMAD mosaic publishes exactly
+# one median per year with no seasonal slice, so the same control is a valid request for one
+# source and a guaranteed 404 for another.
+COMPOSITE_WINDOWS: dict[str, str] = {
+    "annual": "Full year",
+    "dry": "Dry season",
+    "wet": "Wet season",
+}
+DEFAULT_COMPOSITE: dict[str, object] = {"year": 2023, "window": "annual"}
+
+ACTIVE_COMPOSITE: dict[str, object] = dict(DEFAULT_COMPOSITE)
 
 ACTIVE_SOURCES: dict[str, str] = {k: v["default"] for k, v in DATA_SOURCES.items()}
 
 # The inputs a caller cannot choose: one coverage each, pinned in fetch_data.fetch_all.
 # Listed so the API, the sandbox and every report can name what produced a score instead of
-# leaving it implied -- a reader who knows the vegetation maths runs on a 2023 Sentinel-2
-# composite can judge the number; one who does not, cannot.
+# leaving it implied -- a reader who knows the vegetation maths runs on the optical composite
+# this run selected, over the window it selected, can judge the number; one who does not, cannot.
 FIXED_SOURCES: dict[str, str] = {
     "alos": "ALOS PALSAR 2007 L-band mosaic",
     "wofs": "Water Observations from Space, Landsat all-time summary",
-    "geomad": "Sentinel-2 Annual GeoMAD, 2023 composite",
     "rainfall": "CHIRPS monthly rainfall, 24-month mean",
     "crop_mask": "Digital Earth Africa cropland extent",
     "fc_ls": "Digital Earth Africa Landsat fractional-cover annual summary",
@@ -313,6 +386,118 @@ def set_data_sources(sources: dict[str, str] | None) -> dict[str, str]:
 def clear_data_sources() -> None:
     """Restore every selectable layer to the coverage the model is calibrated on."""
     ACTIVE_SOURCES.update({k: v["default"] for k, v in DATA_SOURCES.items()})
+    ACTIVE_COMPOSITE.update(DEFAULT_COMPOSITE)
+
+
+def composite_months(window: str, lat: float | None = None) -> list[int]:
+    """Months inside a composite window, ordered, with the seasons read by hemisphere.
+
+    Dry and wet are properties of the site's climate calendar, not of the northern one: at
+    Gweru the rain falls Nov-Apr, so a "wet season" composite asked for in Europe would be
+    built from this side's dry months and labelled the opposite of what it measures.
+    """
+    if window == "annual":
+        return list(range(1, 13))
+    lat = TARGET_LAT if lat is None else lat
+    dry = [5, 6, 7, 8, 9, 10] if lat < 0 else [11, 12, 1, 2, 3, 4]
+    wet = [11, 12, 1, 2, 3, 4] if lat < 0 else [5, 6, 7, 8, 9, 10]
+    # Ordered so the wrapped half of a season runs continuously across the new year.
+    return dry if window == "dry" else wet
+
+
+def optical_serves(source: str) -> dict:
+    """The years and windows an optical coverage publishes: ``years`` is a closed range."""
+    return OPTICAL_PRODUCTS[source]
+
+
+def optical_years(source: str) -> list[int]:
+    """Every composite year the selected optical coverage answers a GetCoverage for."""
+    lo, hi = optical_serves(source)["years"]
+    return list(range(lo, hi + 1))
+
+
+def optical_credit(source: str) -> str:
+    """Who to thank for the optical pixels, for anywhere a report cites its inputs.
+
+    Optical is the one layer with more than one agency behind it, and crediting Copernicus for
+    a Landsat median is a false attribution on a document someone signs off on.
+    """
+    return OPTICAL_PRODUCTS[source]["credit"]
+
+
+def check_composite(composite: dict | None, sources: dict[str, str] | None = None) -> dict:
+    """Validate a composite window against the optical source that has to serve it.
+
+    Returns the complete choice set, so a request that names only a year still says out loud
+    which season it was computed over. A year nobody asked for is inherited from the default
+    and clamped into what the chosen coverage publishes -- a Landsat 5-7 survey of 2023 is not
+    a request anyone made, whereas 2023 spelled out in a payload is, and gets answered with the
+    span the product has rather than a median silently fetched from a different decade.
+    """
+    sources = ACTIVE_SOURCES if sources is None else sources
+    optical = sources.get("optical", ACTIVE_SOURCES["optical"])
+    served = optical_serves(optical)
+    lo, hi = served["years"]
+    name = DATA_SOURCES["optical"]["options"][optical]
+
+    year = int(DEFAULT_COMPOSITE["year"])
+    chosen = {"year": min(max(year, lo), hi), "window": DEFAULT_COMPOSITE["window"]}
+    for key, value in (composite or {}).items():
+        if key == "year":
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"composite year {value!r} is not a year")
+            if not lo <= value <= hi:
+                raise ValueError(
+                    f"{name} publishes no {value} composite; this coverage serves {lo}-{hi}"
+                )
+        elif key == "window":
+            if value not in COMPOSITE_WINDOWS:
+                raise ValueError(
+                    f"'{value}' is not a composite window; choose one of {', '.join(COMPOSITE_WINDOWS)}"
+                )
+            if value not in served["windows"]:
+                raise ValueError(
+                    f"{name} publishes only {' and '.join(served['windows'])} composites -- "
+                    f"there is no {value} slice to fetch. Sentinel-2 L2A is the source that ships "
+                    "scene dates, and seasons are built from those."
+                )
+        else:
+            raise ValueError(f"unknown composite setting '{key}'; the window takes year and window")
+        chosen[key] = value
+    return chosen
+
+
+def set_composite(composite: dict | None, sources: dict[str, str] | None = None) -> dict:
+    chosen = check_composite(composite, sources)
+    ACTIVE_COMPOSITE.update(chosen)
+    return chosen
+
+
+def composite_signature(source: str | None = None, composite: dict | None = None) -> str:
+    """The one string that names an optical run: product, year and window together.
+
+    Stored in the provenance sidecar, because a cached raster chosen by coverage alone cannot
+    tell a 2023 annual median from a 2024 dry season -- and a score computed from the wrong
+    one of those looks exactly like a score computed from the right one.
+    """
+    source = ACTIVE_SOURCES["optical"] if source is None else source
+    composite = ACTIVE_COMPOSITE if composite is None else composite
+    return f"{source} {composite['year']} {composite['window']}"
+
+
+def composite_label(signature: str) -> str:
+    """Human wording for a signature, for anywhere a report quotes the input."""
+    parts = signature.split()
+    if len(parts) != 3:
+        return signature
+    source, year, window = parts
+    base = DATA_SOURCES["optical"]["options"].get(source, source)
+    if window == "annual":
+        return f"{base}, {year}"
+    return f"{base}, {window} season {year}"
+
 
 
 def source_labels(sources: dict[str, str] | None = None) -> dict[str, str]:

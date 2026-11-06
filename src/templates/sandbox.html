@@ -790,6 +790,12 @@
     }
 
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    /* The optical product names are long enough to truncate inside one column, and the choice
+       is the one that drives the composite row underneath it, so it gets the full width. */
+    .field--wide { grid-column: 1 / -1; }
+    /* .field-row names display, so the attribute alone cannot hide it: an engine without a
+       composite registry would otherwise show two empty selects. */
+    .field-row[hidden] { display: none; }
 
     .input, .select {
       width: 100%;
@@ -1562,7 +1568,7 @@
       <div class="map-chips">
         <span class="chip chip--accent">AOI <b id="banner-aoi">19.5049°S, 29.8460°E</b></span>
         <span class="chip">CRS <b id="banner-crs">UTM 35S · EPSG:32735</b></span>
-        <span class="chip">Imagery <b id="banner-imagery">GeoMAD · Landsat 30 m</b></span>
+        <span class="chip">Imagery <b id="banner-imagery">Sentinel-2 · 30 m</b></span>
       </div>
 
       <div class="map-hint" id="map-hint">Click the map to move the target pin</div>
@@ -1632,6 +1638,8 @@
             <div class="field-row" id="source-fields">
               <p class="hint">Checking which coverages this engine can switch between…</p>
             </div>
+            <div class="field-row" id="composite-fields" hidden></div>
+            <p class="hint" id="composite-note" hidden></p>
             <details class="src-fixed" id="source-fixed" hidden>
               <summary>Other inputs, fixed by the model</summary>
               <ul id="source-fixed-list"></ul>
@@ -2535,10 +2543,11 @@
       // same bands in the same order, so this panel renders what it reports rather than
       // keeping its own list that could offer a swap the scores would not survive.
       var sourceSpecs = [];
+      var compositeSpec = null;
 
       function sourceSelect(spec) {
         var wrap = document.createElement('div');
-        wrap.className = 'field';
+        wrap.className = spec.key === 'optical' ? 'field field--wide' : 'field';
         var id = 'src-' + spec.key;
         var label = document.createElement('label');
         label.className = 'field__label';
@@ -2556,9 +2565,142 @@
         });
         sel.title = 'The survey refetches this layer for the chosen coverage when the cached ' +
                     'one came from another.';
+        if (spec.key === 'optical') { sel.addEventListener('change', applySourceServing); }
         wrap.appendChild(label);
         wrap.appendChild(sel);
         return wrap;
+      }
+
+      /* The composite window is rendered from what the engine reports rather than a fixed menu,
+         because what a product publishes is per-product: Landsat 5-7 stops where Sentinel-2
+         starts, and a GeoMAD mosaic ships one median per year with no seasonal slice. Offering a
+         year or a season the selected coverage cannot answer would be a control that only fails
+         once the survey is running. */
+      function servingOf(sourceId) {
+        var serves = (compositeSpec && compositeSpec.serves) || {};
+        return (sourceId && serves[sourceId]) || null;
+      }
+
+      function compositeField(labelText, id) {
+        var wrap = document.createElement('div');
+        wrap.className = 'field';
+        var label = document.createElement('label');
+        label.className = 'field__label';
+        label.setAttribute('for', id);
+        label.textContent = labelText;
+        var sel = document.createElement('select');
+        sel.className = 'select';
+        sel.id = id;
+        wrap.appendChild(label);
+        wrap.appendChild(sel);
+        return wrap;
+      }
+
+      /* Keep a selection the new product also publishes, otherwise fall back to the calibrated
+         default and then to the newest year: a survey of Landsat 5-7 asked for in 2023 should
+         read as 2012, not as the year the previous source happened to leave in the box. */
+      function preferredValue(sel, options, defId) {
+        var served = function (id) {
+          return options.some(function (o) { return o.id === id; });
+        };
+        if (sel && served(sel.value)) { return sel.value; }
+        if (served(defId)) { return defId; }
+        return options[options.length - 1].id;
+      }
+
+      function fillSelect(sel, options, chosen, defId) {
+        sel.textContent = '';
+        options.forEach(function (o) {
+          var opt = document.createElement('option');
+          opt.value = o.id;
+          opt.textContent = o.id === defId ? o.label + ' (default)' : o.label;
+          opt.disabled = !!o.unavailable;
+          opt.title = o.title || '';
+          if (o.id === chosen) { opt.selected = true; }
+          sel.appendChild(opt);
+        });
+      }
+
+      function opticalFamily() {
+        var served = servingOf(opticalSourceId());
+        return served ? served.family : 'Sentinel-2';
+      }
+
+      /* The map chip used to assert "GeoMAD · Landsat 30 m" whatever the form said, then
+         "Sentinel-2" for every source. Optical is now genuinely a choice of satellites, so the
+         chip names the family the form is actually set to. */
+      function updateImageryChip() {
+        var el = $('banner-imagery');
+        if (!el) { return; }
+        var year = $('composite-year'), win = $('composite-window');
+        if (!year || !win) { return; }
+        var season = win.value === 'annual' ? '' : win.value + ' ';
+        el.textContent = opticalFamily() + ' · ' + season + year.value;
+      }
+
+      function applySourceServing() {
+        var year = $('composite-year'), win = $('composite-window');
+        if (!year || !win || !compositeSpec) { return; }
+        var served = servingOf(opticalSourceId());
+        if (!served) { return; }
+
+        var years = served.years.map(function (y) { return { id: String(y), label: String(y) }; });
+        fillSelect(year, years, preferredValue(year, years, String(compositeSpec.default.year)),
+                   String(compositeSpec.default.year));
+
+        var windows = (compositeSpec.windows || []).map(function (w) {
+          var published = served.windows.indexOf(w.id) !== -1;
+          return { id: w.id, label: w.label, unavailable: !published,
+                   title: published ? '' : served.family + ' ships no ' + w.label.toLowerCase() +
+                          '; the full-year median is all it publishes.' };
+        });
+        fillSelect(win, windows,
+                   preferredValue(win, windows.filter(function (w) { return !w.unavailable; }),
+                                  compositeSpec.default.window),
+                   compositeSpec.default.window);
+        updateCompositeNote();
+      }
+
+      function updateCompositeNote() {
+        var win = $('composite-window'), note = $('composite-note');
+        if (!win || !note || !compositeSpec) { return; }
+        var served = servingOf(opticalSourceId());
+        if (!served) { return; }
+        if (served.windows.length < 2) {
+          note.textContent = served.family + ' publishes one median per year, ' +
+            served.years[0] + '-' + served.years[served.years.length - 1] +
+            ', so the window is fixed to the full year. Choose Sentinel-2 L2A for a seasonal read.';
+        } else if (win.value !== 'annual') {
+          note.textContent = 'A seasonal composite averages the clearest scenes inside those months, ' +
+                             'which the engine picks from the hemisphere of the coordinate. Greenness ' +
+                             'and moisture indices read differently against the full-year median.';
+        } else {
+          note.textContent = '';
+        }
+        note.hidden = !note.textContent;
+        updateImageryChip();
+      }
+
+      function renderComposite(data) {
+        compositeSpec = data || null;
+        var host = $('composite-fields');
+        host.textContent = '';
+        if (!compositeSpec || !compositeSpec.serves) {
+          host.hidden = true;
+          $('composite-note').hidden = true;
+          return;
+        }
+        host.appendChild(compositeField('Composite year', 'composite-year'));
+        host.appendChild(compositeField('Composite window', 'composite-window'));
+        $('composite-year').addEventListener('change', updateImageryChip);
+        $('composite-window').addEventListener('change', updateCompositeNote);
+        host.hidden = false;
+        applySourceServing();
+      }
+
+      function opticalSourceId() {
+        var sel = $('src-optical');
+        return sel ? sel.value : null;
       }
 
       function renderDataSources(data) {
@@ -2571,6 +2713,7 @@
         } else {
           sourceSpecs.forEach(function (spec) { host.appendChild(sourceSelect(spec)); });
         }
+        renderComposite(data && data.composite);
 
         var fixed = (data && data.fixed) || {};
         var keys = Object.keys(fixed);
@@ -2594,6 +2737,14 @@
         return chosen;
       }
 
+      function readCompositeSelection() {
+        var chosen = {};
+        var year = $('composite-year'), win = $('composite-window');
+        if (year) { chosen.year = Number(year.value); }
+        if (win) { chosen.window = win.value; }
+        return chosen;
+      }
+
       function applySourceUsage(sources) {
         // Names what the run recorded on disk, not what the form is showing: a cache hit or a
         // failed refetch can make the two differ, and the snapshot has to describe the numbers.
@@ -2607,7 +2758,12 @@
         }
         el.textContent = labels.join(' · ');
         var fixed = (sources && sources.fixed) || {};
-        el.title = labels.join(', ') + ' | fixed: ' + Object.keys(fixed).map(function (k) { return fixed[k]; }).join(', ');
+        var title = labels.join(', ') + ' | fixed: ' + Object.keys(fixed).map(function (k) { return fixed[k]; }).join(', ');
+        // The scene list is what makes a seasonal composite auditable: two runs on the same
+        // label can be built from different passes, and the dates are the only record of which.
+        var scenes = used.optical && used.optical.scenes;
+        if (scenes && scenes.length) { title += ' | scenes: ' + scenes.join(', '); }
+        el.title = title;
       }
 
       async function refreshDataSources() {
@@ -2771,6 +2927,7 @@
           client_name: $('client').value.trim() || 'Client',
           address: $('address').value.trim(),
           data_sources: readSourceSelection(),
+          composite: readCompositeSelection(),
           async_mode: true
         };
 
@@ -2933,9 +3090,16 @@
             ? (imagery.sites || 0) + ' site' + (imagery.sites === 1 ? '' : 's') + ' · ' + fmtBytes(imagery.bytes)
             : 'empty';
           var sources = data.active_sources || {};
-          sourcesEl.textContent = Object.keys(sources).length
-            ? Object.keys(sources).map(function (k) { return sources[k]; }).join(' · ')
-            : 'engine defaults';
+          var parts = Object.keys(sources).map(function (k) { return sources[k]; });
+          // A wipe throws away the cached optical raster too, so the dialog has to say which
+          // composite window it was built over -- re-fetching that is minutes, not a click.
+          var comp = data.active_composite || {};
+          if (comp.year) {
+            parts.push(comp.window === 'annual'
+              ? 'composite ' + comp.year
+              : 'composite ' + (comp.window_label || comp.window) + ' ' + comp.year);
+          }
+          sourcesEl.textContent = parts.length ? parts.join(' · ') : 'engine defaults';
           if (!outputs.files && !jobs.files) {
             noteEl.textContent = 'There is nothing to clear: no deliverables and no job records on this instance.';
             return;

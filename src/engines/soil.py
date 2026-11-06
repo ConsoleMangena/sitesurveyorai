@@ -111,7 +111,8 @@ def run_soil_survey(
 
     # Ensure required raw rasters exist for active AOI, from the selected coverages
     from src.fetch_data import ensure_raw
-    ensure_raw(["dem.tif"])
+    ensure_raw(["dem.tif", "landcover.tif", "rain_mean.tif", "optical.tif",
+                "crop_mask.tif", "fc_ls_2023.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI — Running Category 3: Soil & Land Survey [{cfg.AOI_SLUG}]")
@@ -126,13 +127,12 @@ def run_soil_survey(
     lc        = warp(cfg.RAW / "landcover.tif", 1, resampling=Resampling.nearest)
     rain      = warp(cfg.RAW / "rain_mean.tif", 1)
 
-    # Sentinel-2 GeoMAD bands (1-indexed in GeoTIFF):
-    # Band 1=B2(blue) 2=B3(green) 3=B4(red) 4=B5 5=B6 6=B7 7=B8(NIR)
-    # 8=B8A 9=B11(SWIR1) 10=B12(SWIR2)
-    red      = warp(cfg.RAW / "geomad.tif",  3, scale=10000.0)
-    nir      = warp(cfg.RAW / "geomad.tif",  7, scale=10000.0)
-    swir1    = warp(cfg.RAW / "geomad.tif",  9, scale=10000.0)
-    swir2    = warp(cfg.RAW / "geomad.tif", 10, scale=10000.0)
+    # Reflectance from whichever Sentinel-2 aggregate this run selected, addressed by band
+    # name so a product switch cannot quietly renumber it.
+    red      = warp(cfg.RAW / "optical.tif", "red", scale=10000.0)
+    nir      = warp(cfg.RAW / "optical.tif", "nir", scale=10000.0)
+    swir1    = warp(cfg.RAW / "optical.tif", "swir_1", scale=10000.0)
+    swir2    = warp(cfg.RAW / "optical.tif", "swir_2", scale=10000.0)
 
     # Check for DE Africa Sandbox Fractional Cover & Cropland Extent
     fc_path = cfg.RAW / "fc_ls_2023.tif"

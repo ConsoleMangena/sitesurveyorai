@@ -13,7 +13,7 @@ import rasterio
 from rasterio.warp import Resampling, reproject
 
 
-def warp(path: Path, band: int = 1, resampling: Resampling = Resampling.bilinear,
+def warp(path: Path, band: int | str = 1, resampling: Resampling = Resampling.bilinear,
          scale: float = 1.0) -> np.ndarray:
     """
     Load a single band from a GeoTIFF and reproject it onto the active
@@ -21,7 +21,7 @@ def warp(path: Path, band: int = 1, resampling: Resampling = Resampling.bilinear
 
     Args:
         path: Path to source GeoTIFF
-        band: 1-based band index
+        band: 1-based band index, or the band's name as the file records it
         resampling: Resampling method
         scale: Divide raw values by this (e.g., 10000 for Sentinel-2 SR)
 
@@ -29,6 +29,16 @@ def warp(path: Path, band: int = 1, resampling: Resampling = Resampling.bilinear
         2D float32 array (HEIGHT × WIDTH) with NaN for nodata
     """
     with rasterio.open(path) as src:
+        if isinstance(band, str):
+            names = list(src.descriptions or ())
+            if band not in names:
+                raise LookupError(
+                    f"{path.name} has no band named '{band}' -- it carries "
+                    f"{', '.join(n for n in names if n) or 'no band names'}. "
+                    "Reading the nearest index instead would score a different "
+                    "part of the spectrum and never say so."
+                )
+            band = names.index(band) + 1
         arr = src.read(band).astype("float32") / scale
         nd = src.nodata
         if nd is not None:
