@@ -17,6 +17,7 @@ Usage:
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ import sys
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,6 +38,7 @@ if str(ROOT_DIR) not in sys.path:
 
 # Always import config first to configure PROJ paths before rasterio loads
 import src.config as cfg
+from src import category_report
 from src.mcp.server import (
     _SITE_LOCK,
     get_boreholes as _mcp_get_boreholes,
@@ -50,7 +53,13 @@ from src.mcp.server import (
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import Response
@@ -125,6 +134,16 @@ DELIVERABLES = {
     "minerals_map": "mineral_prospectivity_map.png",
     "soil_map": "soil_capability_map.png",
     "hazard_map": "hazard_risk_map.png",
+    # Written by src/category_report.py on request rather than by a survey, so they appear
+    # here only once someone has asked for them.
+    "groundwater_report": "groundwater_report.html",
+    "minerals_report": "minerals_report.html",
+    "soil_report": "soil_report.html",
+    "hazard_report": "hazard_report.html",
+    "groundwater_raster_viewer": "groundwater_raster_viewer.html",
+    "minerals_raster_viewer": "minerals_raster_viewer.html",
+    "soil_raster_viewer": "soil_raster_viewer.html",
+    "hazard_raster_viewer": "hazard_raster_viewer.html",
 }
 
 CLAIM_CEILING = {
@@ -697,6 +716,10 @@ async def health_check():
             "api_hazard": "/api/hazard",
             "api_dossier": "/api/dossier",
             "api_report": "/api/report",
+            "api_categories": "/api/categories",
+            "api_category_report": "/api/report/{category}",
+            "api_category_raster": "/api/raster/{category}",
+            "api_category_export": "/api/export/{category}",
             "api_storage": "/api/storage",
             "api_reset": "/api/reset",
             "docs": "/docs",
@@ -980,6 +1003,110 @@ def get_report_endpoint():
         media_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Single-category exports
+# ---------------------------------------------------------------------------
+_CATEGORY_ERRORS = {
+    "not_run": (404, "category_not_run",
+                "Run the survey with this category enabled; the export is built from its summary."),
+    "no_raster": (404, "raster_not_run",
+                  "This survey did not write the classified raster for that category."),
+    "unknown_category": (404, "unknown_category",
+                         "Use one of: water, minerals, soil, hazard."),
+}
+
+
+def _category_or_404(category: str):
+    cat = category_report.get(category)
+    if cat is None:
+        raise _api_error(
+            404,
+            "unknown_category",
+            f"'{category}' is not a survey category.",
+            "Use one of: " + ", ".join(category_report.CATEGORY_ORDER) + ".",
+        )
+    return cat
+
+
+def _category_artefact(kind: str, category: str, download: bool):
+    """Build one category's HTML artefact and hand back the file it wrote.
+
+    The response is the static file, either redirected to (view) or streamed as an
+    attachment (download). A report is only useful if the raster viewer it links to and
+    the GeoTIFF it names sit beside it, so the link must stay rooted in /outputs rather
+    than in this endpoint's own path.
+    """
+    cat = _category_or_404(category)
+    with _SITE_LOCK:
+        result = category_report.ensure(kind, cat.key)
+    if not result["ok"]:
+        code = result.get("code", "build_failed")
+        if code == "build_failed":
+            raise _internal_error(RuntimeError(result.get("message", "")), _request_id())
+        status, name, hint = _CATEGORY_ERRORS[code]
+        raise _api_error(status, name, result["message"], hint)
+    path = result["path"]
+    media = "text/html" if path.suffix == ".html" else "application/octet-stream"
+    if download:
+        return FileResponse(path, media_type=media, filename=path.name,
+                            headers={"Cache-Control": "no-store"})
+    return RedirectResponse(f"/outputs/{path.name}", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/categories", tags=["Reports & Deliverables"])
+def get_categories_endpoint():
+    """Per-category export readiness: what ran, what is on disk, and what it weighs.
+
+    The Exports panel picks one category and offers only the artefacts that exist for it,
+    which needs more than a list of filenames — a category that failed has to be reported
+    as failed rather than offered as a dead download.
+    """
+    return JSONResponse(content=category_report.inventory(), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/report/{category}", tags=["Reports & Deliverables"])
+def get_category_report_endpoint(category: str, download: bool = False):
+    """Standalone HTML report for one survey category."""
+    return _category_artefact("report", category, download)
+
+
+@app.get("/api/raster/{category}", tags=["Reports & Deliverables"])
+def get_category_raster_endpoint(category: str, download: bool = False):
+    """Pan-and-zoom viewer for the category's classified GeoTIFF."""
+    return _category_artefact("viewer", category, download)
+
+
+@app.get("/api/export/{category}", tags=["Reports & Deliverables"])
+def export_category_endpoint(category: str):
+    """Everything one category produced, as a single ZIP.
+
+    Built from the files on disk rather than the whole workspace, so a client doing the
+    groundwater work does not receive the hazard report with it. Regenerating first means
+    the archive never holds a report older than its summary.
+    """
+    cat = _category_or_404(category)
+    with _SITE_LOCK:
+        for kind in ("report", "viewer"):
+            result = category_report.ensure(kind, cat.key)
+            if not result["ok"] and result.get("code") not in ("no_raster",):
+                status, name, hint = _CATEGORY_ERRORS.get(result["code"], (500, "build_failed", ""))
+                raise _api_error(status, name, result["message"], hint)
+        _, members = category_report.bundle_members(cat.key)
+        if not members:
+            raise _api_error(404, "category_not_run", f"No {cat.short} output exists yet.")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            for path in members:
+                archive.write(path, arcname=path.name)
+    stamp = time.strftime("%Y%m%d")
+    size = buffer.tell()
+    headers = {
+        "Content-Disposition": f'attachment; filename="SiteSurveyor_{cat.slug}_{stamp}.zip"',
+        "Cache-Control": "no-store",
+    }
+    return Response(content=buffer.getvalue(), media_type="application/zip", headers=headers)
 
 
 # ---------------------------------------------------------------------------

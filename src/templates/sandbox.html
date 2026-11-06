@@ -1114,6 +1114,57 @@
       pointer-events: none;
     }
 
+    /* ------------------------------------------------------ category exports */
+    /* The unit of delivery is the category the visitor screened, not the whole workspace:
+       one survey answers four separate questions and each is exported on its own. */
+    .cat-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .cat {
+      padding: 9px 10px 10px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--cat, var(--line-strong));
+      border-radius: var(--radius-sm);
+      background: var(--panel-raised);
+      transition: border-color 0.15s, opacity 0.15s;
+    }
+    .cat[data-state="absent"] { border-left-color: var(--line-strong); opacity: 0.62; }
+
+    .cat__head { display: flex; align-items: baseline; gap: 8px; }
+    .cat__name { font-size: 12px; font-weight: 600; color: var(--text-h); }
+    .cat__state {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--dim);
+      white-space: nowrap;
+    }
+    .cat__meta { margin: 3px 0 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
+
+    .cat__actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+    .cat__btn {
+      flex: 1 1 auto;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      padding: 6px 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 11px; font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .cat__btn:hover { border-color: var(--cat, var(--brand-border)); color: var(--text-h); }
+    .cat__btn svg { opacity: 0.7; flex: 0 0 auto; }
+    .cat__btn--icon { flex: 0 0 auto; padding: 6px 8px; }
+    .cat__btn[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+
+    .exports-label {
+      margin: 14px 0 7px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.9px;
+      text-transform: uppercase; color: var(--dim);
+    }
+
     /* ------------------------------------------------------------------ status bar */
     .status-bar {
       height: var(--status-h);
@@ -1302,6 +1353,8 @@
       .indicators { grid-template-columns: 1fr; }
       .exports { grid-template-columns: 1fr; }
       .export--wide { grid-column: auto; }
+      .cat__btn { flex: 1 1 45%; }
+      .cat__btn--icon { flex: 0 0 auto; }
       .brand__sub { display: none; }
       .map-chips { gap: 4px; }
       .chip { font-size: 10px; padding: 4px 8px; }
@@ -1609,7 +1662,12 @@
         </section>
 
         <section class="block">
-          <h2 class="block__title">Exports</h2>
+          <h2 class="block__title">Exports<span class="block__count" id="exports-count">—</span></h2>
+          <div class="cat-list" id="cat-exports">
+            <p class="hint">Checking what this instance can export…</p>
+          </div>
+
+          <p class="exports-label">Whole workspace</p>
           <div class="exports">
             <a class="export export--wide" href="/api/report" target="_blank" rel="noopener" data-deliverable="html_report">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
@@ -1619,24 +1677,8 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2"/><path d="M16 3h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-2"/></svg>
               Master JSON
             </a>
-            <a class="export" href="/outputs/candidate_borehole_sites.kmz" download data-deliverable="boreholes_kmz">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-              Boreholes KMZ
-            </a>
-            <a class="export" href="/outputs/candidate_mineral_targets.kmz" download data-deliverable="minerals_kmz">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-              Minerals KMZ
-            </a>
-            <a class="export" href="/outputs/candidate_land_zones.kmz" download data-deliverable="soil_kmz">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-              Land zones KMZ
-            </a>
-            <a class="export" href="/outputs/safest_buildable_sites.kmz" download data-deliverable="safest_sites_kmz">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-              Safe sites KMZ
-            </a>
           </div>
-          <p class="hint" id="downloads-note">Files are produced by a completed survey; missing ones are disabled rather than left as dead links.</p>
+          <p class="hint" id="downloads-note">The dossier and master JSON cover all four categories at once; a category export covers only its own.</p>
         </section>
       </div>
     </aside>
@@ -2308,6 +2350,128 @@
       }
 
       /* -------------------------------------------------------------- exports */
+      var CAT_ICONS = {
+        report: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>',
+        raster: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/></svg>',
+        kmz: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+        bundle: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 8v13H3V8M2 3h20v5H2zM10 13h4"/></svg>'
+      };
+
+      function catScore(value) {
+        return (Math.round(value * 10) / 10).toString();
+      }
+
+      function catMeta(c) {
+        if (!c.available) {
+          return 'No result on this instance yet. A survey of this category writes its report, raster and vectors.';
+        }
+        var h = c.headline || {};
+        var bits = [];
+        if (h.klass) { bits.push(String(h.klass).split(' (')[0]); }
+        /* Hazard scores the target twice, once for hazard and once for safety; the safety
+           number is the one a client decides on, so that is what the panel quotes. */
+        if (typeof h.safety_score === 'number') {
+          bits.push('safety ' + catScore(h.safety_score) + '/100 at target');
+        } else if (typeof h.score === 'number') {
+          bits.push(catScore(h.score) + '/100 at target');
+        }
+        bits.push(c.candidates + ' ranked ' + c.candidate_noun.toLowerCase() +
+          (c.candidates === 1 ? '' : 's'));
+        return bits.join(' · ');
+      }
+
+      function catButton(icon, label, href, opts) {
+        var a = document.createElement('a');
+        a.className = 'cat__btn' + (opts.iconOnly ? ' cat__btn--icon' : '');
+        a.innerHTML = CAT_ICONS[icon];
+        if (label) { a.appendChild(document.createTextNode(' ' + label)); }
+        else { a.setAttribute('aria-label', opts.title); }
+        a.title = opts.title;
+        if (opts.download) { a.setAttribute('download', ''); }
+        if (opts.blank) { a.target = '_blank'; a.rel = 'noopener'; }
+        if (!opts.enabled || !href) {
+          a.setAttribute('aria-disabled', 'true');
+          a.tabIndex = -1;
+        } else {
+          a.href = href;
+        }
+        return a;
+      }
+
+      function catRow(c) {
+        var node = document.createElement('div');
+        node.className = 'cat';
+        node.style.setProperty('--cat', c.accent);
+        node.setAttribute('data-state', c.available ? 'ready' : 'absent');
+
+        var head = document.createElement('div');
+        head.className = 'cat__head';
+        var name = document.createElement('span');
+        name.className = 'cat__name';
+        name.textContent = c.name;
+        var state = document.createElement('span');
+        state.className = 'cat__state';
+        state.textContent = c.available ? 'ready' : 'not run';
+        head.appendChild(name);
+        head.appendChild(state);
+
+        var meta = document.createElement('p');
+        meta.className = 'cat__meta';
+        meta.textContent = catMeta(c);
+
+        var verify = document.createElement('p');
+        verify.className = 'cat__meta';
+        verify.textContent = 'Field check: ' + c.verification + '.';
+
+        var actions = document.createElement('div');
+        actions.className = 'cat__actions';
+        var kmz = (c.files && c.files.kmz) || {};
+        actions.appendChild(catButton('report', 'Report', c.report.url, {
+          blank: true, enabled: c.available,
+          title: 'Open the client-ready HTML report for ' + c.name
+        }));
+        actions.appendChild(catButton('raster', 'Raster', c.viewer.url, {
+          blank: true, enabled: c.available && c.viewer.raster_available,
+          title: c.viewer.raster_available
+            ? 'View the classified ' + c.name + ' image cell by cell'
+            : 'This survey wrote no classified raster for ' + c.name
+        }));
+        actions.appendChild(catButton('kmz', '', kmz.file ? '/outputs/' + kmz.file : '', {
+          download: true, iconOnly: true, enabled: !!kmz.exists,
+          title: kmz.exists ? 'Download the Google Earth KMZ' : 'No KMZ for this category yet'
+        }));
+        actions.appendChild(catButton('bundle', 'Bundle', c.bundle.url, {
+          download: true, enabled: c.available,
+          title: 'Everything for ' + c.name + ' in one ZIP: report, viewer, maps, GeoTIFFs, CSV, GeoJSON, KML and KMZ'
+        }));
+
+        node.appendChild(head);
+        node.appendChild(meta);
+        node.appendChild(verify);
+        node.appendChild(actions);
+        return node;
+      }
+
+      function renderCategories(inv) {
+        var host = $('cat-exports');
+        host.textContent = '';
+        var list = (inv && inv.categories) || [];
+        list.forEach(function (c) { host.appendChild(catRow(c)); });
+        var ready = list.filter(function (c) { return c.available; }).length;
+        $('exports-count').textContent = ready + ' of ' + list.length;
+      }
+
+      async function refreshCategories() {
+        try {
+          var inv = await fetchJson('/api/categories', {}, 20000);
+          renderCategories(inv);
+        } catch (e) {
+          $('cat-exports').innerHTML =
+            '<p class="hint">Category exports could not be listed. The engine may still be busy with a survey.</p>';
+          $('exports-count').textContent = '—';
+        }
+      }
+
       function applyDownloads(urls) {
         if (!urls) { return; }
         var links = document.querySelectorAll('[data-deliverable]');
@@ -2330,10 +2494,10 @@
            instance every link is dead because nothing exists, not because one produced a
            subset. */
         $('downloads-note').textContent = !disabled
-          ? 'All exports are ready for download.'
+          ? 'The workspace dossier and its master JSON are both present.'
           : (disabled === total
-              ? 'No exports exist on this instance yet; a completed survey writes them.'
-              : 'Only the files this survey produced are enabled; greyed-out exports were not generated.');
+              ? 'No survey has run here, so there is no workspace dossier yet; the category rows above stay disabled until one does.'
+              : 'The workspace dossier has not been compiled; a completed survey writes it.');
       }
 
       /* -------------------------------------------------------------- results */
@@ -2481,6 +2645,7 @@
           applyTarget(result.target);
           renderResults(result, { source: 'survey' });
           applyDownloads(result.download_urls || {});
+          refreshCategories();
           updateProgress(100, 'Complete');
           setJobStatus('done', 'Survey complete');
           setEngine('ready', 'Engine ready');
@@ -2653,6 +2818,7 @@
           setJobStatus('idle', files ? 'Cleared ' + files + ' file(s)' : 'Workspace clear');
           /* Re-check availability from the server rather than assuming the panel is right. */
           refreshDeliverables();
+          refreshCategories();
           var failed = res.failed || [];
           if (failed.length) {
             showError(
@@ -2801,6 +2967,7 @@
 
         preloadLastSurvey();
         refreshDeliverables();
+        refreshCategories();
       }
 
       boot();
