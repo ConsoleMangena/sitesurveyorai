@@ -826,6 +826,42 @@
       margin-top: 6px;
     }
 
+    /* The registry's non-selectable layers: disclosure, not a control, so it stays folded
+       and quiet until someone asks what else fed the score. */
+    .src-fixed { margin-top: 9px; }
+    .src-fixed[hidden] { display: none; }
+    .src-fixed summary {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: var(--dim);
+      cursor: pointer;
+    }
+    .src-fixed summary:hover { color: var(--muted); }
+    .src-fixed ul {
+      margin: 7px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 4px;
+    }
+    .src-fixed li {
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--muted);
+      padding-left: 11px;
+      position: relative;
+    }
+    .src-fixed li::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 6px;
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: var(--line-strong);
+    }
+
     .segmented {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -1254,6 +1290,10 @@
     .wipe-scope__row--remove i { color: var(--bad); }
     .wipe-scope__row--keep { border-left: 3px solid var(--ok); color: var(--muted); }
     .wipe-scope__row--keep i { color: var(--ok); }
+    /* Neither deleted nor kept: the selection is written back over, so it gets its own mark
+       rather than borrowing the green of "your data is safe" or the red of "it is gone". */
+    .wipe-scope__row--revert { border-left: 3px solid var(--line-strong); color: var(--muted); }
+    .wipe-scope__row--revert i { color: var(--dim); }
     .wipe-scope__row b { color: var(--text); font-weight: 500; }
     .wipe-scope__row--remove b { color: var(--err-strong); }
     .wipe-scope__size {
@@ -1498,6 +1538,7 @@
             <div><dt>CRS</dt><dd id="snap-crs">—</dd></div>
             <div><dt>Grid</dt><dd>30 m · MCDA</dd></div>
             <div><dt>Source</dt><dd id="snap-source">No survey yet</dd></div>
+            <div><dt>Inputs</dt><dd id="snap-inputs" title="Elevation and land cover the scores were computed from">—</dd></div>
             <div><dt>Basis</dt><dd id="snap-basis">AOI percentile</dd></div>
           </dl>
         </section>
@@ -1584,6 +1625,18 @@
               <label><input type="checkbox" id="cat-soil" checked><span>Soil</span></label>
               <label><input type="checkbox" id="cat-hazard" checked><span>Hazard</span></label>
             </div>
+          </fieldset>
+
+          <fieldset class="field" style="border:0;">
+            <legend class="field__label">Data inputs</legend>
+            <div class="field-row" id="source-fields">
+              <p class="hint">Checking which coverages this engine can switch between…</p>
+            </div>
+            <details class="src-fixed" id="source-fixed" hidden>
+              <summary>Other inputs, fixed by the model</summary>
+              <ul id="source-fixed-list"></ul>
+              <p class="hint" id="source-fixed-note"></p>
+            </details>
           </fieldset>
 
           <button type="submit" class="run" id="btn-run">
@@ -1720,8 +1773,13 @@
           <b>Downloaded satellite imagery</b>
           <span class="wipe-scope__size" id="wipe-imagery">&mdash;</span>
         </div>
+        <div class="wipe-scope__row wipe-scope__row--revert">
+          <i aria-hidden="true">&#8634;</i>
+          <b>Data input selection</b>
+          <span class="wipe-scope__size" id="wipe-sources">&mdash;</span>
+        </div>
       </div>
-      <p class="wipe-dialog__note" id="wipe-note">The report, maps and KMZ exports come back only by running a survey again: a few minutes per site. The imagery cache is kept because it is input, not a result, and re-fetching it from Digital Earth Africa is the slow part.</p>
+      <p class="wipe-dialog__note" id="wipe-note">The report, maps and KMZ exports come back only by running a survey again: a few minutes per site. The imagery cache is kept because it is input, not a result, and re-fetching it from Digital Earth Africa is the slow part. The data input selection goes back to the coverages the models are calibrated on.</p>
     </div>
     <div class="wipe-dialog__foot">
       <span class="spacer"></span>
@@ -2472,6 +2530,95 @@
         }
       }
 
+      /* -------------------------------------------------------- data inputs */
+      // The registry lives server-side: it is the engine that knows which coverages carry the
+      // same bands in the same order, so this panel renders what it reports rather than
+      // keeping its own list that could offer a swap the scores would not survive.
+      var sourceSpecs = [];
+
+      function sourceSelect(spec) {
+        var wrap = document.createElement('div');
+        wrap.className = 'field';
+        var id = 'src-' + spec.key;
+        var label = document.createElement('label');
+        label.className = 'field__label';
+        label.setAttribute('for', id);
+        label.textContent = spec.label;
+        var sel = document.createElement('select');
+        sel.className = 'select';
+        sel.id = id;
+        spec.options.forEach(function (o) {
+          var opt = document.createElement('option');
+          opt.value = o.id;
+          opt.textContent = o.id === spec.default ? o.label + ' (default)' : o.label;
+          if (o.id === spec.active) { opt.selected = true; }
+          sel.appendChild(opt);
+        });
+        sel.title = 'The survey refetches this layer for the chosen coverage when the cached ' +
+                    'one came from another.';
+        wrap.appendChild(label);
+        wrap.appendChild(sel);
+        return wrap;
+      }
+
+      function renderDataSources(data) {
+        sourceSpecs = (data && data.sources) || [];
+        var host = $('source-fields');
+        host.textContent = '';
+        if (!sourceSpecs.length) {
+          host.innerHTML = '<p class="hint">This engine exposes no interchangeable coverages, ' +
+                           'so every survey runs on its calibrated defaults.</p>';
+        } else {
+          sourceSpecs.forEach(function (spec) { host.appendChild(sourceSelect(spec)); });
+        }
+
+        var fixed = (data && data.fixed) || {};
+        var keys = Object.keys(fixed);
+        $('source-fixed').hidden = !keys.length;
+        var list = $('source-fixed-list');
+        list.textContent = '';
+        keys.forEach(function (key) {
+          var li = document.createElement('li');
+          li.textContent = fixed[key];
+          list.appendChild(li);
+        });
+        $('source-fixed-note').textContent = (data && data.note) || '';
+      }
+
+      function readSourceSelection() {
+        var chosen = {};
+        sourceSpecs.forEach(function (spec) {
+          var sel = $('src-' + spec.key);
+          if (sel && sel.value) { chosen[spec.key] = sel.value; }
+        });
+        return chosen;
+      }
+
+      function applySourceUsage(sources) {
+        // Names what the run recorded on disk, not what the form is showing: a cache hit or a
+        // failed refetch can make the two differ, and the snapshot has to describe the numbers.
+        var el = $('snap-inputs');
+        var used = (sources && sources.selectable) || {};
+        var labels = Object.keys(used).map(function (key) { return used[key].label; });
+        if (!labels.length) {
+          el.textContent = '—';
+          el.title = 'Elevation and land cover the scores were computed from';
+          return;
+        }
+        el.textContent = labels.join(' · ');
+        var fixed = (sources && sources.fixed) || {};
+        el.title = labels.join(', ') + ' | fixed: ' + Object.keys(fixed).map(function (k) { return fixed[k]; }).join(', ');
+      }
+
+      async function refreshDataSources() {
+        try {
+          renderDataSources(await fetchJson('/api/data_sources', {}, 15000));
+        } catch (e) {
+          $('source-fields').innerHTML =
+            '<p class="hint">Could not read the available coverages, so this survey runs on the engine defaults.</p>';
+        }
+      }
+
       function applyDownloads(urls) {
         if (!urls) { return; }
         var links = document.querySelectorAll('[data-deliverable]');
@@ -2524,6 +2671,7 @@
         countIndicators([water.cell_score, minerals.cell_score, soil.cell_score, hazard.safety_score]);
 
         renderCandidates(collectCandidates(data));
+        applySourceUsage(data.data_sources);
 
         var note = $('results-note');
         note.hidden = false;
@@ -2622,6 +2770,7 @@
           categories: categories,
           client_name: $('client').value.trim() || 'Client',
           address: $('address').value.trim(),
+          data_sources: readSourceSelection(),
           async_mode: true
         };
 
@@ -2704,6 +2853,7 @@
             $('results-note').hidden = false;
             $('results-note').textContent = 'No completed survey yet on this instance. Pick a coordinate and run one.';
             $('snap-source').textContent = 'No survey yet';
+            $('snap-inputs').textContent = '—';
             if (explicit) { setJobStatus('idle', 'No saved survey'); }
             return;
           }
@@ -2744,6 +2894,7 @@
         note.hidden = false;
         note.textContent = 'Processed data was cleared from this instance. Pick a coordinate and run a survey to build new results.';
         $('snap-source').textContent = 'No survey yet';
+        $('snap-inputs').textContent = '—';
         $('snap-basis').textContent = 'AOI percentile';
         clearError();
       }
@@ -2754,6 +2905,7 @@
         var outputEl = $('wipe-outputs');
         var jobsEl = $('wipe-jobs');
         var imageryEl = $('wipe-imagery');
+        var sourcesEl = $('wipe-sources');
         var noteEl = $('wipe-note');
 
         /* Nothing is confirmable until the workspace has been measured: the count in
@@ -2764,6 +2916,7 @@
         outputEl.textContent = 'measuring…';
         jobsEl.textContent = 'measuring…';
         imageryEl.textContent = 'measuring…';
+        sourcesEl.textContent = 'checking…';
         dialog.showModal();
 
         try {
@@ -2779,6 +2932,10 @@
           imageryEl.textContent = imagery.files
             ? (imagery.sites || 0) + ' site' + (imagery.sites === 1 ? '' : 's') + ' · ' + fmtBytes(imagery.bytes)
             : 'empty';
+          var sources = data.active_sources || {};
+          sourcesEl.textContent = Object.keys(sources).length
+            ? Object.keys(sources).map(function (k) { return sources[k]; }).join(' · ')
+            : 'engine defaults';
           if (!outputs.files && !jobs.files) {
             noteEl.textContent = 'There is nothing to clear: no deliverables and no job records on this instance.';
             return;
@@ -2793,6 +2950,7 @@
           outputEl.textContent = 'unknown';
           jobsEl.textContent = 'unknown';
           imageryEl.textContent = 'unknown';
+          sourcesEl.textContent = 'unknown';
           noteEl.textContent = 'Could not read the workspace (' + e.message + '), so deleting is disabled. Nothing has been removed yet.';
         }
       }
@@ -2819,6 +2977,7 @@
           /* Re-check availability from the server rather than assuming the panel is right. */
           refreshDeliverables();
           refreshCategories();
+          refreshDataSources();
           var failed = res.failed || [];
           if (failed.length) {
             showError(
@@ -2968,6 +3127,7 @@
         preloadLastSurvey();
         refreshDeliverables();
         refreshCategories();
+        refreshDataSources();
       }
 
       boot();

@@ -71,11 +71,8 @@ def _ensure_data_present(required: list[str] | None = None):
     """Verify that required satellite layers exist; fetch from DE Africa if missing."""
     if required is None:
         required = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif", "wofs.tif", "rain_mean.tif"]
-    missing = [f for f in required if not (cfg.RAW / f).exists()]
-    if missing:
-        from src.fetch_data import fetch_all
-        layer_names = [f.replace(".tif", "").replace("_mean", "") for f in missing]
-        fetch_all(layers=layer_names)
+    from src.fetch_data import ensure_raw
+    ensure_raw(required)
 
 
 def _cached_summary(path: Path, latitude: float, longitude: float) -> dict | None:
@@ -107,6 +104,22 @@ def _cached_summary(path: Path, latitude: float, longitude: float) -> dict | Non
         return None
     if abs(float(lat) - latitude) > 0.001 or abs(float(lon) - longitude) > 0.001:
         print(f"[cache] {path.name} is for ({lat:.5f}, {lon:.5f}), not ({latitude:.5f}, {longitude:.5f})")
+        return None
+
+    # A cached score is only honest while the coverages behind it are the selected ones.
+    from src.fetch_data import stale_layers
+    stale = stale_layers()
+    if stale:
+        print(f"[cache] {path.name} was computed from another coverage than the selection "
+              f"({', '.join(stale)} differ) -- re-running survey")
+        return None
+
+    # One category refetching a layer leaves every other summary scored from the raster it
+    # replaced, and the selection alone cannot show that -- the file mtimes can.
+    newer = [p.name for p in (cfg.RAW / f"{spec['layer']}.tif" for spec in cfg.DATA_SOURCES.values())
+             if p.exists() and p.stat().st_mtime > path.stat().st_mtime]
+    if newer:
+        print(f"[cache] {path.name} predates the {' and '.join(newer)} on disk -- re-running survey")
         return None
     return cached
 

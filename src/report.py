@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import src.config as cfg
+from src import fetch_data
 
 
 def _load_category(path: Path) -> tuple[dict | None, str]:
@@ -366,6 +367,14 @@ def _build_html_report(dossier: dict) -> str:
                 f'<div class="map-box"><h4>{map_title}</h4>'
                 f'<p class="map-missing">Map not embedded: {img_note}.</p></div>')
     maps_html = "\n      ".join(map_panels)
+
+    # Credited from the sidecars the fetch left in this AOI, not from the registry defaults:
+    # a dossier that names Copernicus DEM while the scores came from SRTM is a false
+    # attribution on a document someone signs off on.
+    used_sources = fetch_data.used_sources()
+    dea_credit = ", ".join(_escape(v["label"]) + " (CC BY 4.0)"
+                           for v in used_sources["selectable"].values())
+    and_credit = f" and {dea_credit}" if dea_credit else ""
 
     # Coordinates are generated from the survey output instead of hardcoding each #1 pick.
     # A client acting on one point has no fallback if that spot is already spoken for, and
@@ -935,8 +944,8 @@ def _build_html_report(dossier: dict) -> str:
 
     <!-- Data attribution -->
     <div class="attribution">
-      <strong>Data attribution:</strong> Copernicus Sentinel-2 and Copernicus DEM 30m via
-      Digital Earth Africa (CC BY 4.0); ESA WorldCover (CC BY 4.0); JAXA ALOS PALSAR mosaic
+      <strong>Data attribution:</strong> Copernicus Sentinel-2{and_credit} via
+      Digital Earth Africa; JAXA ALOS PALSAR mosaic
       (&copy; JAXA/METI); Landsat imagery courtesy of USGS/NASA; CHIRPS precipitation courtesy
       of the Climate Hazards Center, UC Santa Barbara. Screening output produced by
       SiteSurveyor AI &mdash; Eineva Labs.
@@ -945,8 +954,9 @@ def _build_html_report(dossier: dict) -> str:
     <!-- Regulatory / Engineering Disclaimer -->
     <div class="disclaimer">
       <strong>SCREENING-LEVEL INTELLIGENCE DISCLAIMER:</strong><br/>
-      This dossier is produced by SiteSurveyor AI using autonomous multi-sensor satellite Earth observation
-      (Copernicus Sentinel-2, Copernicus DEM 30m, JAXA ALOS PALSAR, ESA WorldCover, and CHIRPS precipitation).
+      This dossier is produced by SiteSurveyor AI using autonomous multi-sensor satellite Earth
+      observation: elevation, land cover, optical and radar backscatter, and precipitation, each
+      named in the attribution above.
       All findings represent pre-feasibility, screening-level probability zoning. This analysis is not a substitute
       for certified geotechnical, hydrogeological, or mining engineering field investigations. Ground geophysical
       confirmation (VES / ERT resistivity, soil assays, and structural ground truthing) is mandatory prior to drilling,

@@ -65,11 +65,9 @@ def run_minerals_survey(
     if target_lat is not None and target_lon is not None:
         cfg.set_target_site(target_lat, target_lon, half_deg=half_deg, client=client, address=address)
 
-    # Ensure required raw rasters exist for active AOI
-    required_raw = ["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"]
-    if any(not (cfg.RAW / f).exists() for f in required_raw):
-        from src.fetch_data import fetch_all
-        fetch_all()
+    # Ensure required raw rasters exist for active AOI, from the selected coverages
+    from src.fetch_data import ensure_raw
+    ensure_raw(["dem.tif", "landcover.tif", "alos.tif", "geomad.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI — Running Category 2: Mineral Prospectivity Survey [{cfg.AOI_SLUG}]")

@@ -38,7 +38,7 @@ if str(ROOT_DIR) not in sys.path:
 
 # Always import config first to configure PROJ paths before rasterio loads
 import src.config as cfg
-from src import category_report
+from src import category_report, fetch_data
 from src.mcp.server import (
     _SITE_LOCK,
     get_boreholes as _mcp_get_boreholes,
@@ -75,6 +75,12 @@ class SurveyRequest(BaseModel):
     categories: list[str] = Field(default=["all"], description="Categories: 'water', 'minerals', 'soil', 'hazard', or 'all'")
     client_name: str = Field(default="Client", max_length=120, description="Client or project name")
     address: str = Field(default="", max_length=240, description="Location or property address description")
+    data_sources: dict[str, str] = Field(
+        default={},
+        description="Selectable input coverages, e.g. {\"dem\": \"dem_srtm\"}. Layers left out "
+                    "use their default; GET /api/data_sources lists what is selectable and what "
+                    "each option means.",
+    )
     half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
     async_mode: bool = Field(
         default=False,
@@ -87,6 +93,10 @@ class TargetRequest(BaseModel):
     latitude: float = Field(..., ge=-90, le=90, description="Target latitude in decimal degrees")
     longitude: float = Field(..., ge=-180, le=180, description="Target longitude in decimal degrees")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of ranked candidates to return")
+    data_sources: dict[str, str] = Field(
+        default={},
+        description="Selectable input coverages for this run, as for /api/survey.",
+    )
     half_deg: float = Field(default=0.12, gt=0, le=0.5, description="AOI radius buffer in degrees (~13.3 km)")
 
 
@@ -351,6 +361,45 @@ def _check_coverage(lat: float, lon: float) -> None:
         )
 
 
+def _check_data_sources(sources: dict[str, str]) -> dict[str, str]:
+    """Validate a source selection at the request rather than mid-survey.
+
+    An unchecked coverageid only fails once the fetcher asks WCS for it, several minutes and
+    one typed error away from the field that caused it -- and an optional layer failing that
+    late produces a scored map with a silently missing input.
+    """
+    try:
+        return cfg.check_data_sources(sources)
+    except ValueError as exc:
+        raise _api_error(
+            400,
+            "invalid_data_source",
+            str(exc),
+            "GET /api/data_sources lists the selectable layers and their available coverages.",
+        ) from exc
+
+
+def _data_sources_payload() -> dict[str, Any]:
+    """The registry and the live selection in the shape the sandbox renders selects from."""
+    active = dict(cfg.ACTIVE_SOURCES)
+    return {
+        "sources": [
+            {
+                "key": key,
+                "label": spec["label"],
+                "layer": spec["layer"],
+                "default": spec["default"],
+                "active": active.get(key, spec["default"]),
+                "options": [{"id": cid, "label": label} for cid, label in spec["options"].items()],
+            }
+            for key, spec in cfg.DATA_SOURCES.items()
+        ],
+        "fixed": dict(cfg.FIXED_SOURCES),
+        "note": "Only coverages the engine can swap without changing what a score means are "
+                "selectable. The rest are listed so a report can say what produced the numbers.",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Survey execution
 # ---------------------------------------------------------------------------
@@ -423,6 +472,7 @@ def _storage_report() -> dict:
         "confirm_phrase": WIPE_CONFIRMATION,
         "active_aoi": cfg.AOI_SLUG,
         "active_client": cfg.CLIENT,
+        "active_sources": cfg.source_labels(),
         "state_dir_persistent": cfg.STATE_DIR != cfg.ROOT,
     }
 
@@ -459,9 +509,9 @@ def _clear_dir(path: Path) -> tuple[int, int, list[str]]:
 def _run_survey(payload: dict, base_url: str) -> dict:
     """Configure the AOI and run every requested category under the single-site lock.
 
-    ``set_target_site`` mutates module globals that the engines read, so it has to happen
-    inside the lock. Doing it in the request handler (before acquiring) let a second
-    caller re-point an in-flight survey at a different AOI mid-run.
+    ``set_target_site`` and ``set_data_sources`` mutate module globals that the engines read,
+    so they have to happen inside the lock. Doing it in the request handler (before acquiring)
+    let a second caller re-point an in-flight survey at a different AOI mid-run.
     """
     lat, lon, half_deg = payload["latitude"], payload["longitude"], payload["half_deg"]
     with _SITE_LOCK:
@@ -472,6 +522,7 @@ def _run_survey(payload: dict, base_url: str) -> dict:
             client=payload["client_name"],
             address=payload["address"] or None,
         )
+        cfg.set_data_sources(payload.get("data_sources"))
         result = _mcp_survey_site(
             latitude=lat,
             longitude=lon,
@@ -480,6 +531,10 @@ def _run_survey(payload: dict, base_url: str) -> dict:
             address=payload["address"],
             half_deg=half_deg,
         )
+        # Read back from the sidecars rather than echoing the request: the layers the score
+        # came from are what a reader of this result needs, and a refetch failure or a cache
+        # hit from an earlier selection makes those differ from what was asked for.
+        result["data_sources"] = fetch_data.used_sources()
 
     urls, missing = _deliverables(base_url)
     result["target"] = _target_block(lat, lon, half_deg)
@@ -631,12 +686,14 @@ def _enrich_single_category(data: dict, lat: float, lon: float, half_deg: float,
 
 
 def _targeted(req: TargetRequest, run) -> dict:
-    """Run a single-category tool with the AOI configured inside the lock."""
+    """Run a single-category tool with the AOI and inputs configured inside the lock."""
     _check_coverage(req.latitude, req.longitude)
+    sources = _check_data_sources(req.data_sources)
     request_id = _request_id()
     try:
         with _SITE_LOCK:
             cfg.set_target_site(req.latitude, req.longitude, half_deg=req.half_deg)
+            cfg.set_data_sources(sources)
             return run()
     except Exception as exc:
         raise _internal_error(exc, request_id) from exc
@@ -720,6 +777,7 @@ async def health_check():
             "api_category_report": "/api/report/{category}",
             "api_category_raster": "/api/raster/{category}",
             "api_category_export": "/api/export/{category}",
+            "api_data_sources": "/api/data_sources",
             "api_storage": "/api/storage",
             "api_reset": "/api/reset",
             "docs": "/docs",
@@ -730,6 +788,18 @@ async def health_check():
 # ---------------------------------------------------------------------------
 # REST API Endpoints (Directly consumed by Supabase Edge Functions & Web UI)
 # ---------------------------------------------------------------------------
+@app.get("/api/data_sources", tags=["Geospatial Screening"])
+def get_data_sources_endpoint():
+    """Which survey inputs can be chosen, what each option is, and what is live now.
+
+    The registry is the whole story of what is selectable: a layer is offered only when its
+    alternative coverages carry the same bands in the same order, so switching one cannot
+    change what the resulting score means. Everything else stays fixed and is listed under
+    ``fixed`` so a caller can still see what fed the numbers.
+    """
+    return JSONResponse(content=_data_sources_payload(), headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/survey", tags=["Geospatial Screening"], response_model=None)
 def run_survey_endpoint(req: SurveyRequest, request: Request):
     """
@@ -748,6 +818,7 @@ def run_survey_endpoint(req: SurveyRequest, request: Request):
         "categories": [c.lower().strip() for c in req.categories] or ["all"],
         "client_name": req.client_name.strip() or "Client",
         "address": (req.address or "").strip(),
+        "data_sources": _check_data_sources(req.data_sources),
     }
     base_url = str(request.base_url).rstrip("/")
 
@@ -926,9 +997,9 @@ def reset_workspace_endpoint(req: ResetRequest, request: Request):
 
     Downloaded Digital Earth imagery under data/raw is input rather than output — several
     hundred MB that only a fresh AOI needs, and slow to refetch — so it is reported and
-    left in place. The live AOI and client identity do go back to the neutral defaults:
-    a workspace holding no results must not keep presenting the last survey's target and
-    client name as its own.
+    left in place. The live AOI, client identity and input-source selection do go back to
+    the neutral defaults: a workspace holding no results must not keep presenting the last
+    survey's target, client name, or elevation model as its own.
     """
     _require_same_origin(request)
     if req.confirm != WIPE_CONFIRMATION:
@@ -958,6 +1029,7 @@ def reset_workspace_endpoint(req: ResetRequest, request: Request):
     with _JOBS_LOCK:
         _JOBS.clear()
     cfg.clear_target_site()
+    cfg.clear_data_sources()
 
     logger.info(
         "Workspace cleared: %d output file(s) (%d bytes), %d job file(s) (%d bytes), %d failure(s)",

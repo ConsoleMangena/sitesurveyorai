@@ -118,19 +118,87 @@ def fetch(name: str, coverage: str, stamp: str | None = None, projected: bool = 
     Fetch a DE Africa layer via WCS with local caching in the active AOI directory.
     """
     out = cfg.RAW / f"{name}.tif"
+    src = cfg.RAW / f"{name}.src"
 
     if cache and out.exists() and out.stat().st_size > 0:
-        try:
-            with rasterio.open(out) as ds:
-                if ds.width > 0 and ds.height > 0:
-                    print(f"[cache] {name:12s} ({out.stat().st_size / (1024*1024):.1f} MB)")
-                    return out
-        except Exception as exc:
-            print(f"[cache] {name:12s} cached file unreadable, re-fetching: {type(exc).__name__}: {exc}")
+        # The cache is keyed by layer name, so the sidecar is the only record of which
+        # coverage produced it: without the match, switching the elevation model would
+        # keep analysing the DEM downloaded for the previous one.
+        cached_from = provenance(name)
+        if cached_from != coverage:
+            print(f"[cache] {name:12s} cached from '{cached_from or 'unknown'}', "
+                  f"not '{coverage}' - re-fetching")
+        else:
+            try:
+                with rasterio.open(out) as ds:
+                    if ds.width > 0 and ds.height > 0:
+                        print(f"[cache] {name:12s} ({out.stat().st_size / (1024*1024):.1f} MB)")
+                        return out
+            except Exception as exc:
+                print(f"[cache] {name:12s} cached file unreadable, re-fetching: {type(exc).__name__}: {exc}")
 
     url = _url(coverage, cfg.BBOX_WGS84, stamp, projected, target_crs)
     success = _download(url, out, retries, optional)
-    return out if success else None
+    if success:
+        src.write_text(coverage, encoding="utf-8")
+        return out
+    return None
+
+
+def provenance(name: str) -> str:
+    """The coverageid the cached layer on disk was actually downloaded from."""
+    src = cfg.RAW / f"{name}.src"
+    if src.exists():
+        try:
+            return src.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    for spec in cfg.DATA_SOURCES.values():
+        if spec["layer"] == name:
+            return spec["default"]
+    return ""
+
+
+def used_sources() -> dict:
+    """Name the coverages the rasters on disk came from, for anywhere that discloses inputs.
+
+    The sidecars are the authority rather than ``cfg.ACTIVE_SOURCES``: a report that named the
+    coverage the caller asked for instead of the one the numbers were actually computed from
+    would be a false attribution, and the two differ whenever a cached layer predates a switch.
+    """
+    selectable = {}
+    for key, spec in cfg.DATA_SOURCES.items():
+        coverage = provenance(spec["layer"]) or cfg.ACTIVE_SOURCES[key]
+        selectable[key] = {"coverage": coverage, "label": spec["options"].get(coverage, coverage)}
+    return {"selectable": selectable, "fixed": dict(cfg.FIXED_SOURCES)}
+
+
+def stale_layers() -> list[str]:
+    """Selectable layers this AOI holds from a coverage other than the one selected."""
+    stale = []
+    for key, spec in cfg.DATA_SOURCES.items():
+        name = spec["layer"]
+        if (cfg.RAW / f"{name}.tif").exists() and provenance(name) != cfg.ACTIVE_SOURCES[key]:
+            stale.append(name)
+    return stale
+
+
+def ensure_raw(required: list[str]) -> None:
+    """Fetch what this AOI is missing, and what it holds from the wrong coverage.
+
+    The engines used to gate on the files merely existing, so a survey that switched elevation
+    model re-scored the previous coverage while its report credited the new one. A selection
+    nobody checks against the cache is a selection that silently does nothing.
+    """
+    stale = stale_layers()
+    missing = [name for name in required if not (cfg.RAW / name).exists()]
+    if not stale and not missing:
+        return
+    if stale:
+        print(f"[sources] {', '.join(stale)} cached from another coverage than the one selected; "
+              "refetching")
+    want = sorted({name[: -len(".tif")].replace("_mean", "") for name in missing} | set(stale))
+    fetch_all(layers=want)
 
 
 def fetch_all(
@@ -158,13 +226,13 @@ def fetch_all(
     results: dict[str, Path | None] = {}
     want = set(layers) if layers else None
 
-    # 1. Copernicus DEM 30m
+    # 1. Elevation model (selectable: Copernicus DEM, SRTM, NASA DEM)
     if want is None or "dem" in want:
-        results["dem"] = fetch("dem", "dem_cop_30", cache=use_cache)
+        results["dem"] = fetch("dem", cfg.ACTIVE_SOURCES["dem"], cache=use_cache)
 
-    # 2. ESA WorldCover 2021 (10m)
+    # 2. Land cover map (selectable: ESA WorldCover 2021 / 2020, 10 m)
     if want is None or "landcover" in want:
-        results["landcover"] = fetch("landcover", "esa_worldcover_2021", cache=use_cache)
+        results["landcover"] = fetch("landcover", cfg.ACTIVE_SOURCES["landcover"], cache=use_cache)
 
     # 3. ALOS PALSAR 2007 L-Band SAR Mosaic
     if want is None or "alos" in want:

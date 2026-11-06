@@ -75,10 +75,9 @@ def run_water_survey(
     if target_lat is not None and target_lon is not None:
         cfg.set_target_site(target_lat, target_lon, half_deg=half_deg, client=client, address=address)
 
-    # Ensure required raw rasters exist for active AOI
-    if not (cfg.RAW / "dem.tif").exists():
-        from src.fetch_data import fetch_all
-        fetch_all()
+    # Ensure required raw rasters exist for active AOI, from the selected coverages
+    from src.fetch_data import ensure_raw
+    ensure_raw(["dem.tif"])
 
     print("=" * 65)
     print(f"SiteSurveyor AI — Running Category 1: Groundwater Survey [{cfg.AOI_SLUG}]")

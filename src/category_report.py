@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 import src.config as cfg
+from src import fetch_data
 from src.report import _img_to_base64_src, _load_category, _survey_identity
 from src.utils.classification import NODATA_CLASS, NODATA_HEX
 
@@ -693,6 +694,7 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
           <dt>CRS</dt><dd>{{CRS_LABEL}}</dd>
           <dt>Extent</dt><dd>{{EXTENT}}</dd>
           <dt>No data</dt><dd>{{NODATA_SHARE}}</dd>
+          <dt>Inputs</dt><dd>{{SOURCES}}</dd>
         </dl>
       </div>
       <div>
@@ -1666,6 +1668,38 @@ def _pct(pct: float) -> str:
     return f"{pct:.1f}%"
 
 
+def _sources_note(used: dict) -> str:
+    """What the rasters on disk for this survey area actually came from.
+
+    Read off the fetch sidecars rather than from the request or the module defaults, so a
+    report about a cached refetch cannot credit the coverage the caller asked for when the
+    numbers came from the one already on disk.
+    """
+    parts = []
+    chosen = [v["label"] for v in used.get("selectable", {}).values()]
+    fixed = list(used.get("fixed", {}).values())
+    if chosen:
+        parts.append("<strong>Chosen for this run:</strong> " + _e(" · ".join(chosen)))
+    if fixed:
+        parts.append("<strong>Fixed inputs:</strong> " + _e(" · ".join(fixed)))
+    if not parts:
+        return ""
+    return ('<div class="note"><strong>Inputs this score was computed from.</strong> '
+            + "<br>".join(parts) + "</div>")
+
+
+def _attribution_block(used: dict) -> str:
+    """Provider credit, with the swappable layers named as this run recorded them."""
+    named = ", ".join(v["label"] + " (CC BY 4.0)" for v in used.get("selectable", {}).values())
+    lead = (f"Copernicus Sentinel-2 and {named} via Digital Earth Africa" if named
+            else "Copernicus Sentinel-2 via Digital Earth Africa")
+    return (
+        '<div class="attribution"><strong>Data attribution:</strong> '
+        f"{lead}; JAXA ALOS PALSAR mosaic (&copy; JAXA/METI); Landsat imagery courtesy of "
+        "USGS/NASA; CHIRPS precipitation courtesy of the Climate Hazards Center, UC Santa Barbara.</div>"
+    )
+
+
 def _raster_section(cat: Category) -> str:
     """The classified GeoTIFF itself: its shares, and the two ways to open it.
 
@@ -1866,11 +1900,9 @@ def build_report_html(cat: Category, data: dict) -> str:
         banner = ('<div class="banner"><strong>No ranked sites.</strong> The index was computed, '
                   "but nothing in this survey area cleared the siting threshold for this category.</div>")
 
-    attribution = """
-    <div class="attribution"><strong>Data attribution:</strong> Copernicus Sentinel-2 and Copernicus
-    DEM 30m via Digital Earth Africa (CC BY 4.0); ESA WorldCover (CC BY 4.0); JAXA ALOS PALSAR mosaic
-    (&copy; JAXA/METI); Landsat imagery courtesy of USGS/NASA; CHIRPS precipitation courtesy of the
-    Climate Hazards Center, UC Santa Barbara.</div>"""
+    used = fetch_data.used_sources()
+    attribution = _attribution_block(used)
+    sources_html = _sources_note(used)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1930,6 +1962,7 @@ def build_report_html(cat: Category, data: dict) -> str:
     {raster_html}
 
     <div class="section-title">How this category is modelled</div>
+    {sources_html}
     {breaks_html}
     {weight_items}
 
@@ -2017,6 +2050,7 @@ def build_viewer_html(cat: Category, dec: dict, files: dict, data: dict | None) 
         return f"./{path.name}" if path else "#"
 
     html = VIEWER_TEMPLATE
+    chosen = " · ".join(v["label"] for v in fetch_data.used_sources()["selectable"].values())
     filled = {
         "{{NAME}}": _e(cat.name),
         "{{CLIENT}}": _e(str(identity["client"] or cfg.DEFAULT_CLIENT)),
@@ -2032,6 +2066,7 @@ def build_viewer_html(cat: Category, dec: dict, files: dict, data: dict | None) 
         "{{CRS_LABEL}}": f"EPSG:{dec['epsg']}" if dec["epsg"] else "local grid",
         "{{EXTENT}}": f"{xmin:.0f}–{xmax:.0f} E · {ymin:.0f}–{ymax:.0f} N",
         "{{NODATA_SHARE}}": f"{nodata['pct']:.1f}% of cells" if nodata else "none",
+        "{{SOURCES}}": _e(" · ".join(v["label"] for v in fetch_data.used_sources()["selectable"].values())) or "engine defaults",
         "{{INDEX_LABEL}}": _e(cat.index_label),
         "{{CAND_NOUN}}": _e(cat.candidate_noun),
         "{{TIFF_HREF}}": f"./{cat.zones_tif}",

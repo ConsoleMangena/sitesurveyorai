@@ -112,6 +112,49 @@ HAZARD_WEIGHTS = {
     "drought_stress":   0.15,
 }
 
+# --- Selectable Input Sources ---
+# Only layers whose alternative Digital Earth Africa coverages are interchangeable at the
+# engine level: one band, same units, same class scheme. GeoMAD is deliberately absent -
+# gm_s2_annual carries 14 bands and gm_ls8_annual / gm_ls8_ls9_annual carry 10, while the
+# engines read bands by position (1, 3, 7, 9, 10), so switching it would feed smad, bcmad
+# and count into the vegetation maths and still return a confident-looking 0-100 score.
+DATA_SOURCES: dict[str, dict] = {
+    "dem": {
+        "label": "Elevation model",
+        "layer": "dem",
+        "default": "dem_cop_30",
+        "options": {
+            "dem_cop_30": "Copernicus DEM 30 m",
+            "dem_srtm": "SRTM 30 m",
+            "nasadem": "NASA DEM 30 m",
+        },
+    },
+    "landcover": {
+        "label": "Land cover map",
+        "layer": "landcover",
+        "default": "esa_worldcover_2021",
+        "options": {
+            "esa_worldcover_2021": "ESA WorldCover 2021",
+            "esa_worldcover_2020": "ESA WorldCover 2020",
+        },
+    },
+}
+
+ACTIVE_SOURCES: dict[str, str] = {k: v["default"] for k, v in DATA_SOURCES.items()}
+
+# The inputs a caller cannot choose: one coverage each, pinned in fetch_data.fetch_all.
+# Listed so the API, the sandbox and every report can name what produced a score instead of
+# leaving it implied -- a reader who knows the vegetation maths runs on a 2023 Sentinel-2
+# composite can judge the number; one who does not, cannot.
+FIXED_SOURCES: dict[str, str] = {
+    "alos": "ALOS PALSAR 2007 L-band mosaic",
+    "wofs": "Water Observations from Space, Landsat all-time summary",
+    "geomad": "Sentinel-2 Annual GeoMAD, 2023 composite",
+    "rainfall": "CHIRPS monthly rainfall, 24-month mean",
+    "crop_mask": "Digital Earth Africa cropland extent",
+    "fc_ls": "Digital Earth Africa Landsat fractional-cover annual summary",
+}
+
 # --- Dynamic AOI State Variables ---
 TARGET_LON: float = 29.84597927542165
 TARGET_LAT: float = -19.50487490194389
@@ -232,6 +275,54 @@ def clear_target_site() -> None:
     instance that now holds no data about them at all.
     """
     set_target_site(client=DEFAULT_CLIENT, address=DEFAULT_CLIENT_ADDRESS)
+
+
+def check_data_sources(sources: dict[str, str] | None) -> dict[str, str]:
+    """Validate a selection against DATA_SOURCES and return the complete choice set.
+
+    Rejects anything outside the registry rather than passing a bad coverageid through to
+    WCS, where it would surface as a download failure several layers away from the choice
+    that caused it. Layers the caller leaves out come back as their defaults rather than as
+    whatever the previous survey selected: a request should describe the run it produces in
+    full, or a report would state a source nobody asked for.
+    """
+    chosen = {key: spec["default"] for key, spec in DATA_SOURCES.items()}
+    for key, value in (sources or {}).items():
+        spec = DATA_SOURCES.get(key)
+        if spec is None:
+            raise ValueError(
+                f"unknown data source '{key}'; selectable layers are "
+                f"{', '.join(sorted(DATA_SOURCES))}"
+            )
+        if value not in spec["options"]:
+            raise ValueError(
+                f"'{value}' is not an available {spec['label'].lower()}; choose one of "
+                f"{', '.join(spec['options'])}"
+            )
+        chosen[key] = value
+    return chosen
+
+
+def set_data_sources(sources: dict[str, str] | None) -> dict[str, str]:
+    """Point the selectable input layers at the requested DEA coverages."""
+    chosen = check_data_sources(sources)
+    ACTIVE_SOURCES.update(chosen)
+    return chosen
+
+
+def clear_data_sources() -> None:
+    """Restore every selectable layer to the coverage the model is calibrated on."""
+    ACTIVE_SOURCES.update({k: v["default"] for k, v in DATA_SOURCES.items()})
+
+
+def source_labels(sources: dict[str, str] | None = None) -> dict[str, str]:
+    """Coverage id -> registry display name, for the places that quote a source to a person."""
+    chosen = ACTIVE_SOURCES if sources is None else sources
+    return {
+        key: DATA_SOURCES[key]["options"][value]
+        for key, value in chosen.items()
+        if DATA_SOURCES.get(key) and value in DATA_SOURCES[key]["options"]
+    }
 
 
 # Initialize default AOI on import (Gweru, Zimbabwe)

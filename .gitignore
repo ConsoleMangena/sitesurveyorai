@@ -32,6 +32,7 @@ Thumbs.db
 # ---- Project data directories ----
 data/raw/
 data/external/
+data/jobs/
 outputs/
 
 # ---- Rasters in data dirs ----
