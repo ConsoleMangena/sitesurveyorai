@@ -155,7 +155,7 @@ def test_heavy_endpoints_do_not_block_the_event_loop():
     for handler in (api.run_survey_endpoint, api.get_boreholes_endpoint,
                     api.get_minerals_endpoint, api.get_soil_endpoint,
                     api.get_hazard_endpoint, api.get_dossier_endpoint,
-                    api.get_report_endpoint):
+                    api.get_category_report_endpoint, api.get_category_raster_endpoint):
         assert not inspect.iscoroutinefunction(handler), (
             f"{handler.__name__} would block the loop for the whole survey")
 

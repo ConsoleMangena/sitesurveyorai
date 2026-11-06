@@ -78,7 +78,7 @@ def main():
     parser.add_argument(
         "--report",
         action="store_true",
-        help="Generate executive multi-category HTML + JSON dossier from existing survey outputs",
+        help="Generate the executive multi-category JSON dossier from existing survey outputs",
     )
     parser.add_argument(
         "--force-fetch",

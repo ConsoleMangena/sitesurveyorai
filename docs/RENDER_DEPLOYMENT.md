@@ -42,7 +42,8 @@ Once deployed at `https://sitesurveyor-engine.onrender.com`:
 | **REST** | `/api/soil` | `POST` | Agricultural land capability & erosion risk zoning |
 | **REST** | `/api/hazard` | `POST` | Natural hazard exposure & safest buildable locations |
 | **REST** | `/api/dossier` | `GET` | Master multi-criteria JSON dossier |
-| **Report** | `/api/report` | `GET` | Standalone interactive 18 MB HTML Executive Dossier |
+| **Report** | `/api/report/{category}` | `GET` | Client HTML report for water, minerals, soil or hazard |
+| **Viewer** | `/api/raster/{category}` | `GET` | Classified raster viewer for that category |
 | **Static** | `/outputs/{file}` | `GET` | Direct downloads of `.kmz`, `.geojson`, `.csv`, `.png` |
 
 ---
@@ -98,7 +99,7 @@ if (toolCall.name === "screen_groundwater_boreholes") {
 The frontend (`apps/web`) can:
 1. **Download Mobile GPS KMZ**: Link to `https://sitesurveyor-engine.onrender.com/outputs/candidate_borehole_sites.kmz`
 2. **Display High-Res Map in Modal**: Image `https://sitesurveyor-engine.onrender.com/outputs/groundwater_potential_map.png`
-3. **Open Executive Report**: Render `https://sitesurveyor-engine.onrender.com/api/report` inside an `<iframe>`.
+3. **Open a Category Report**: Render `https://sitesurveyor-engine.onrender.com/api/report/water` inside an `<iframe>`.
 4. **Render Vector Points on Map**: Fetch GeoJSON from `https://sitesurveyor-engine.onrender.com/outputs/candidate_borehole_sites.geojson` and display candidates on Leaflet / Mapbox.
 
 ---

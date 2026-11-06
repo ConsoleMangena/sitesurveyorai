@@ -40,7 +40,7 @@ Add this to your MCP configuration (`claude_desktop_config.json` or `.cursor/mcp
 * `get_minerals(latitude, longitude)` — Shear-zone gold prospectivity & hydrothermal alteration.
 * `get_soil_capability(latitude, longitude)` — Agricultural suitability & erosion risk.
 * `get_hazard_safety(latitude, longitude)` — Natural hazards (flood, slope failure, wildfire) and safest buildable sites.
-* `get_executive_dossier()` — Master multi-criteria scorecard and portable HTML report.
+* `get_executive_dossier()` — Master multi-criteria scorecard across the categories that ran.
 
 *(For full details, see [`docs/MCP_GUIDE.md`](docs/MCP_GUIDE.md)).*
 
@@ -49,7 +49,7 @@ Add this to your MCP configuration (`claude_desktop_config.json` or `.cursor/mcp
 ## 💻 CLI Usage
 
 ```bash
-# Run all survey categories + generate executive HTML/JSON dossier:
+# Run all survey categories, then compile the executive JSON dossier:
 python main.py --category all
 
 # Run individual categories:
@@ -58,7 +58,7 @@ python main.py --category minerals    # Shear-zone gold prospectivity screening
 python main.py --category soil        # Soil capability & erosion risk
 python main.py --category hazard      # Multi-hazard & site safety screening
 
-# Generate executive HTML + JSON dossier from existing survey outputs:
+# Compile the executive JSON dossier from existing survey outputs:
 python main.py --report
 
 # Start the MCP server:
@@ -76,7 +76,8 @@ python -m src.mcp_server --transport sse     # Cloud SSE transport (port 8000)
 | **Cat 2: MINERALS** | [`src/engines/minerals.py`](src/engines/minerals.py) | Sentinel-2 GeoMAD (SWIR/NIR/Red/Blue), ALOS PALSAR, DEM | `mineral_prospectivity_map.png`, `candidate_mineral_targets.csv/.geojson/.kmz`, `mineral_prospectivity_index.tif` |
 | **Cat 3: SOIL & LAND** | [`src/engines/soil.py`](src/engines/soil.py) | Sentinel-2 (NDVI, NDMI, BSI), Copernicus DEM, ESA WorldCover, CHIRPS | `soil_capability_map.png`, `candidate_land_zones.csv/.geojson/.kmz`, `soil_capability_index.tif` |
 | **Cat 5: HAZARD & RISK** | [`src/engines/hazard.py`](src/engines/hazard.py) | Landsat WOfS 1984-2024 water frequency, DEM slope/ponding, Sentinel-2 dry biomass fuel | `hazard_risk_map.png`, `safest_buildable_sites.csv/.geojson/.kmz`, `hazard_composite_index.tif` |
-| **EXECUTIVE DOSSIER** | [`src/report.py`](src/report.py) | Consolidated outputs from all categories | `SiteSurveyor_Intelligence_Report.html` (self-contained, base64 maps), `master_site_dossier.json` |
+| **EXECUTIVE DOSSIER** | [`src/report.py`](src/report.py) | Consolidated outputs from all categories | `master_site_dossier.json` (the scorecard the sandbox panel and MCP agents read) |
+| **CLIENT REPORTS** | [`src/category_report.py`](src/category_report.py) | One category's summary, raster and candidates | `groundwater_report.html`, `minerals_report.html`, `soil_report.html`, `hazard_report.html` plus their raster viewers |
 
 ---
 
@@ -99,7 +100,7 @@ SiteSurveyorAI/
     ├── __init__.py
     ├── config.py               # Central AOI, CRS (UTM 35S), 30m grid extents, and AHP weights
     ├── fetch_data.py           # WCS 2.1.0 satellite acquisition from DE Africa Sandbox
-    ├── report.py               # Executive multi-category HTML + JSON dossier generator
+    ├── report.py               # Executive multi-category JSON dossier compiler
     ├── mcp_server.py           # Direct MCP entrypoint runner
     ├── mcp/
     │   ├── __init__.py

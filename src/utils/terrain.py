@@ -17,6 +17,9 @@ import src.config as cfg
 # 0.002 degrees per 30 m cell) so flow routing never dead-ends in a flat.
 FILL_EPSILON_M = 1e-3
 
+# D8 neighbour offsets indexed by the direction codes d8_flow assigns.
+_D8_OFFSETS = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
+
 
 def fill_sinks(dem: np.ndarray) -> np.ndarray:
     """
@@ -75,16 +78,7 @@ def d8_flow(filled: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     flow_acc = np.ones((h, w), dtype="float32")
 
     # D8 neighbor offsets (dr, dc) and distances
-    d8_offsets = [
-        (0, 1),   # 0: E
-        (1, 1),   # 1: SE
-        (1, 0),   # 2: S
-        (1, -1),  # 3: SW
-        (0, -1),  # 4: W
-        (-1, -1), # 5: NW
-        (-1, 0),  # 6: N
-        (-1, 1),  # 7: NE
-    ]
+    d8_offsets = _D8_OFFSETS
     dist = [cfg.CELL if dr == 0 or dc == 0 else cfg.CELL * 1.41421356 for dr, dc in d8_offsets]
 
     # Vectorized steepest downslope calculation across all 8 D8 directions
@@ -130,6 +124,52 @@ def d8_flow(filled: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     flow_acc[~valid] = np.nan
 
     return flow_dir, flow_acc
+
+
+def height_above_channel(
+    dem: np.ndarray,
+    filled: np.ndarray,
+    flow_dir: np.ndarray,
+    stream_mask: np.ndarray,
+) -> np.ndarray:
+    """
+    Metres each cell stands above the channel floor its surface water drains to (HAC).
+
+    The channel floor is where the weathered profile meets saturated ground, so HAC is
+    the topographic handle on depth to water and on cover thickness. Cells are visited in
+    ascending filled elevation, which guarantees the downslope neighbour is resolved
+    before the cell above it; the floor a cell inherits is its neighbour's *unfilled*
+    elevation, so a depression the DEM reports does not inflate the answer.
+
+    NaN where the D8 path dies in a pit or leaves the AOI before meeting a channel, and
+    where the DEM has no data: no observed valley floor means no estimate, not a dry one.
+    """
+    h, w = dem.shape
+    observed = np.isfinite(dem) & np.isfinite(filled)
+    channels = np.asarray(stream_mask, dtype=bool) & observed
+    thalweg = np.full((h, w), np.nan, dtype="float32")
+    if not channels.any():
+        return thalweg
+    thalweg[channels] = dem[channels]
+
+    # Border cells hold flow_dir = -1, so every routing step below stays inside the grid.
+    order = np.argsort(np.where(observed, filled, np.inf).ravel(), kind="stable")
+    dir_flat = flow_dir.ravel()
+    thal_flat = thalweg.ravel()
+    for p in order:
+        if not np.isfinite(filled.flat[p]):
+            break  # the rest of the order is data void
+        d = int(dir_flat[p])
+        if d < 0 or np.isfinite(thal_flat[p]):
+            continue
+        dr, dc = _D8_OFFSETS[d]
+        r, c = divmod(int(p), w)
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < h and 0 <= nc < w and np.isfinite(thalweg[nr, nc]):
+            thal_flat[p] = thalweg[nr, nc]
+
+    hac = np.where(np.isfinite(thalweg), np.maximum(dem - thalweg, 0.0), np.nan)
+    return hac.astype("float32")
 
 
 def _stencil_reaches_void(dem: np.ndarray) -> np.ndarray:

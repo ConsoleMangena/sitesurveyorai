@@ -289,7 +289,6 @@ def survey_site(
             "mineral grade, or buildability. Ground truthing is required before capital spend."
         ),
         "deliverables": {
-            "executive_html_dossier": str(cfg.OUT / "SiteSurveyor_Intelligence_Report.html"),
             "master_json_dossier": str(cfg.OUT / "master_site_dossier.json"),
             "maps": {
                 "groundwater_map": str(cfg.OUT / "groundwater_potential_map.png"),
@@ -322,7 +321,8 @@ def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
         top_k: Number of ranked candidate borehole sites to return (default: 5).
 
     Returns:
-        Dictionary containing target property potential, ranked candidate sites with GPS coordinates,
+        Dictionary containing target property potential, the estimated wet- and dry-season depth to
+        water at the target and at each ranked site, ranked candidate sites with GPS coordinates,
         proximity distance, score, and recommended geophysical verification steps (VES/ERT).
     """
     cfg.set_target_site(latitude, longitude)
@@ -334,6 +334,14 @@ def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
 
     candidates = data.get("candidate_sites", [])[:top_k]
     target_info = data.get("target_assessment", {})
+    first = candidates[0] if candidates else {}
+    wet, dry = first.get("depth_to_water_wet_m"), first.get("depth_to_water_dry_m")
+    depth_advice = ""
+    if wet is not None and dry is not None:
+        depth_advice = (f" Expected water table at Candidate #{first.get('rank', 1)} is "
+                        f"{wet}-{dry} m below surface, which reads as "
+                        f"{first.get('borehole_read') or 'a rig-drilled hole'}. That range is "
+                        "estimated from the terrain, not measured, so the sounding decides.")
 
     return {
         "target_coordinates": {"latitude": latitude, "longitude": longitude},
@@ -343,12 +351,16 @@ def get_boreholes(latitude: float, longitude: float, top_k: int = 5) -> dict:
             "parcel_150m_mean": target_info.get("parcel_mean_150m"),
             "twi": target_info.get("twi"),
             "slope_degrees": target_info.get("slope_degrees"),
+            "depth_to_water_wet_m": target_info.get("depth_to_water_wet_m"),
+            "depth_to_water_dry_m": target_info.get("depth_to_water_dry_m"),
+            "height_above_channel_m": target_info.get("height_above_channel_m"),
         },
         "ranked_candidates": candidates,
+        "screening_depth_model": data.get("screening_depth_model"),
         "advisory": (
             "Screening-level satellite analysis. Recommended next step: Perform Vertical Electrical Sounding (VES) "
             "resistivity sounding at Candidate #1 to confirm depth to aquifer and fracture permeability."
-        ),
+        ) + ((" " + depth_advice) if depth_advice else ""),
         "kmz_mobile_gps_file": str(cfg.OUT / "candidate_borehole_sites.kmz"),
     }
 
@@ -377,6 +389,15 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
 
     targets = data.get("candidate_targets", [])[:top_k]
     target_info = data.get("target_assessment", {})
+    first = targets[0] if targets else {}
+    cover_low, cover_high = first.get("overburden_min_m"), first.get("overburden_max_m")
+    cover_advice = ""
+    if cover_low is not None and cover_high is not None:
+        cover_advice = (f" Expected cover at Target #{first.get('rank', 1)} is {cover_low}-{cover_high} m "
+                        f"({first.get('overburden_landform') or 'landform not resolvable'}), so the first "
+                        f"test hole goes to {first.get('test_hole_depth_m')} m with a "
+                        f"{first.get('sampling_method') or 'truck-mounted auger rig'}. That is cover to "
+                        "fresh rock estimated from the terrain, not ore depth.")
 
     return {
         "target_coordinates": {"latitude": latitude, "longitude": longitude},
@@ -384,8 +405,16 @@ def get_minerals(latitude: float, longitude: float, top_k: int = 5) -> dict:
             "cell_score": target_info.get("coordinate_cell_score"),
             "cell_class": target_info.get("coordinate_cell_class"),
             "parcel_150m_mean": target_info.get("parcel_mean_150m"),
+            "overburden_min_m": target_info.get("overburden_min_m"),
+            "overburden_max_m": target_info.get("overburden_max_m"),
+            "test_hole_depth_m": target_info.get("test_hole_depth_m"),
         },
         "ranked_targets": targets,
+        "screening_depth_model": data.get("screening_depth_model"),
+        "advisory": (
+            "Screening-level satellite analysis. Sample the indicated structural targets on the ground "
+            "before any trenching or drilling."
+        ) + ((" " + cover_advice) if cover_advice else ""),
         "kmz_mobile_gps_file": str(cfg.OUT / "candidate_mineral_targets.kmz"),
     }
 
@@ -486,8 +515,8 @@ def get_executive_dossier() -> dict:
     Retrieve the master cross-category site intelligence dossier.
 
     Returns:
-        Consolidated scorecard across all categories, metadata, and the absolute path
-        to the self-contained HTML executive report.
+        Consolidated scorecard across all categories, metadata, and the path to the
+        JSON dossier on disk.
     """
     dossier_path = cfg.OUT / "master_site_dossier.json"
     if not dossier_path.exists():
@@ -497,16 +526,14 @@ def get_executive_dossier() -> dict:
         with open(dossier_path, "r", encoding="utf-8") as f:
             dossier = json.load(f)
 
-    html_path = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
-
     return {
         "title": dossier.get("title"),
         "client": dossier.get("client"),
         "address": dossier.get("address"),
         "generated_at": dossier.get("generated_at"),
         "executive_scorecard": dossier.get("executive_scorecard"),
-        "html_report_path": str(html_path) if html_path.exists() else None,
-        "html_report_size_bytes": html_path.stat().st_size if html_path.exists() else 0,
+        "dossier_path": str(dossier_path) if dossier_path.exists() else None,
+        "dossier_size_bytes": dossier_path.stat().st_size if dossier_path.exists() else 0,
     }
 
 
@@ -521,15 +548,6 @@ def get_master_dossier_resource() -> str:
     if path.exists():
         return path.read_text(encoding="utf-8")
     return json.dumps({"error": "Master dossier not yet generated. Run survey_site first."})
-
-
-@mcp.resource("sitesurveyor://reports/SiteSurveyor_Intelligence_Report.html")
-def get_html_report_resource() -> str:
-    """Read the standalone HTML Executive Intelligence Dossier."""
-    path = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return "<html><body><h1>Report not yet generated. Please execute survey_site.</h1></body></html>"
 
 
 # ============================================================================

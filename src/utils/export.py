@@ -16,6 +16,7 @@ def export_candidates_kml(
     candidates: list[dict],
     out_path: Path,
     survey_name: str = "Groundwater Potential",
+    footnote: str = "Recommended for ground geophysical verification (VES / ERT).",
 ) -> Path:
     """
     Generate an interactive Google Earth KML file for mobile GPS navigation.
@@ -65,7 +66,7 @@ def export_candidates_kml(
         lat = cand.get("latitude", 0)
         lon = cand.get("longitude", 0)
 
-        kml_lines.extend([
+        lines = [
             '  <Placemark>',
             f'    <name>Candidate #{rank} ({score}/100 - {cls})</name>',
             '    <description><![CDATA[',
@@ -75,7 +76,11 @@ def export_candidates_kml(
             f'      <b>Distance from Client Site:</b> {dist:.2f} km<br/>',
             f'      <b>GPS Latitude:</b> {lat:.5f}<br/>',
             f'      <b>GPS Longitude:</b> {lon:.5f}<br/>',
-            '      <p><i>Recommended for ground geophysical verification (VES / ERT).</i></p>',
+        ]
+        for note in cand.get("field_notes", []):
+            lines.append(f'      <b>{note}</b><br/>')
+        lines.extend([
+            f'      <p><i>{footnote}</i></p>',
             '    ]]></description>',
             '    <styleUrl>#candidateStyle</styleUrl>',
             '    <Point>',
@@ -83,6 +88,7 @@ def export_candidates_kml(
             '    </Point>',
             '  </Placemark>',
         ])
+        kml_lines.extend(lines)
 
     kml_lines.extend([
         '</Document>',

@@ -116,6 +116,68 @@ HAZARD_WEIGHTS = {
     "drought_stress":   0.15,
 }
 
+# --- Screening Depth Model ---
+# Two questions a crew asks before it mobilises: how deep is the water, and how deep is
+# the soil before solid rock. Neither is measured from orbit; both are read off the same
+# 30 m DEM the indices use, so every report calls them estimates and names the method.
+# These are the calibration knobs; the reasoning lives in src/utils/depth.py.
+DEPTH_MODEL = {
+    # A cell counts as valley floor once its D8 catchment reaches this many 30 m cells.
+    # The threshold has to clear first-order rills: on this low-relief craton a single
+    # 30 m cell in a narrow hollow is not a local base level, and if it counts as one,
+    # every valley-floor candidate comes back at the same shallow depth and the column
+    # says nothing. At ~2.25 km² of rising ground behind it, the valley is a valley.
+    "channel_catchment_cells": 2500,
+    # Water table: depth below surface = floor + ratio x height above the channel floor.
+    # The dry-season ratio carries the drawdown between the November rains and the May low.
+    "groundwater_wet_floor_m": 1.0,
+    "groundwater_wet_ratio": 0.30,
+    "groundwater_dry_floor_m": 3.0,
+    "groundwater_dry_ratio": 0.70,
+    "groundwater_max_m": 60.0,
+    # Seasonally saturated land keeps its wet-season table at or near the surface.
+    "wetland_wet_max_m": 0.5,
+    "wetland_dry_max_m": 3.0,
+    # Overburden bands: (upper slope limit in degrees, landform, cover metres low, high).
+    "overburden_bands": [
+        (3.0, "Valley floor and alluvial flat", 4.0, 12.0),
+        (8.0, "Lower slope and colluvial apron", 2.0, 6.0),
+        (15.0, "Mid-slope residual mantle", 1.0, 3.0),
+        (float("inf"), "Crest, ridge and scarp", 0.0, 1.0),
+    ],
+    # Ground this broken has been stripped of mantle, so the band moves one step thinner.
+    "dissected_relief_m": 10.0,
+    # The first hole has to prove the contact, so it goes this far past the cover.
+    "test_hole_penetration_m": 3.0,
+    # Method ladders: (depth limit in metres, what that depth needs on site).
+    "borehole_reads": [
+        (5.0, "Hand-dug well or sand point"),
+        (30.0, "Hand-pump borehole"),
+        (float("inf"), "Rig-drilled cased borehole"),
+    ],
+    "sampling_reads": [
+        (4.0, "Hand-excavated test pit"),
+        (20.0, "Truck-mounted auger rig"),
+        (float("inf"), "Wireline or diamond core rig"),
+    ],
+}
+
+# ESA WorldCover class names, so a candidate row can say what stands on the ground
+# rather than leaving the crew with a code.
+LANDCOVER_NAMES = {
+    10: "Trees",
+    20: "Shrubland",
+    30: "Grassland",
+    40: "Cropland",
+    50: "Built-up",
+    60: "Bare ground",
+    70: "Snow and ice",
+    80: "Water body",
+    90: "Wetland",
+    95: "Mangrove",
+    100: "Moss and lichen",
+}
+
 # --- Selectable Input Sources ---
 # Elevation and land cover qualify because their alternative coverages are interchangeable at
 # the engine level: one band, same units, same class scheme. Optical qualifies on one condition

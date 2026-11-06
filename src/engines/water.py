@@ -49,6 +49,7 @@ from src.utils.classification import (
     safe_round,
     zone_class,
 )
+from src.utils import depth
 from src.utils.lineaments import (
     detect_lineaments, effective_min_length_m, extract_edges, lineament_density,
 )
@@ -58,6 +59,7 @@ from src.utils.terrain import (
     d8_flow,
     drainage_density,
     fill_sinks,
+    height_above_channel,
     slope_degrees,
     terrain_hillshade,
     twi,
@@ -95,15 +97,23 @@ def run_water_survey(
 
     # 2. Terrain and hydrological modeling
     print("[2/6] Modeling terrain derivatives, D8 flow, and TWI...")
+    water_mask = (lc == 80)
+    saturated_mask = np.isin(lc, (90, 95))
     slope = slope_degrees(dem)
     hs = terrain_hillshade(dem)
     filled = fill_sinks(dem)
     flow_slope = slope_degrees(filled)
-    _, flow_acc = d8_flow(filled)
+    flow_dir, flow_acc = d8_flow(filled)
     twi_layer = twi(filled, flow_slope, flow_acc=flow_acc)
     drain_dens = drainage_density(flow_acc, threshold=500, kernel_radius=17,
                                  valid_mask=np.isfinite(filled))
-    del filled, flow_slope, flow_acc
+
+    # The same routing that produced TWI also says how high each cell sits above the
+    # valley floor it drains to, and that height is what depth to water is read from.
+    channels = flow_acc >= cfg.DEPTH_MODEL["channel_catchment_cells"]
+    hac = height_above_channel(dem, filled, flow_dir, channels)
+    water_table = depth.groundwater_table(hac, surface_water=water_mask, saturated=saturated_mask)
+    del filled, flow_slope, flow_acc, flow_dir, channels
     gc.collect()
 
     # 3. Structural fracture extraction
@@ -168,8 +178,7 @@ def run_water_survey(
     del index_raw, norm_slope, norm_twi, norm_infil, norm_drain, norm_rain, norm_ndvi
     gc.collect()
 
-    # Masks for water and settlements
-    water_mask = (lc == 80)
+    # Masks for settlements (open water was masked where the depth model needed it)
     builtup_mask = (lc == 50)
 
     # Natural breaks classification
@@ -201,6 +210,37 @@ def run_water_survey(
     )
     print(f"      Identified {len(candidates)} high-potential borehole candidates (prioritized by proximity)")
 
+    # Attach what a crew mobilises on: how high above the valley floor each site sits,
+    # the depth that implies at both ends of the season, and what stands on the ground.
+    for cand in candidates:
+        r, c = cand["row"], cand["col"]
+        lc_code = int(lc[r, c]) if np.isfinite(lc[r, c]) else None
+        cand["elevation_m"] = safe_round(dem[r, c], 1)
+        cand["height_above_channel_m"] = safe_round(hac[r, c], 1)
+        cand["depth_to_water_wet_m"] = safe_round(water_table["wet"][r, c], 1)
+        cand["depth_to_water_dry_m"] = safe_round(water_table["dry"][r, c], 1)
+        cand["borehole_read"] = depth.borehole_read(water_table["dry"][r, c])
+        cand["slope_degrees"] = safe_round(slope[r, c], 1)
+        cand["twi"] = safe_round(twi_layer[r, c], 2)
+        cand["ndvi"] = safe_round(ndvi_layer[r, c], 3)
+        cand["rainfall_mm_month"] = safe_round(rain[r, c], 1)
+        cand["landcover"] = cfg.LANDCOVER_NAMES.get(lc_code)
+        cand["field_notes"] = [
+            f"Water table: {cand['depth_to_water_wet_m']}-{cand['depth_to_water_dry_m']} m "
+            "below surface (wet to dry season)",
+            f"Construction read: {cand['borehole_read']}",
+            f"{cand['height_above_channel_m']} m above the valley floor it drains to",
+            f"Elevation: {cand['elevation_m']} m | Slope: {cand['slope_degrees']}° | "
+            f"TWI: {cand['twi']}",
+        ]
+
+    if candidates:
+        first = candidates[0]
+        print(f"      #1 water table expected at {first['depth_to_water_wet_m']}"
+              f"-{first['depth_to_water_dry_m']} m below surface "
+              f"({first['height_above_channel_m']} m above the valley floor) — "
+              f"{first['borehole_read']}")
+
     # 6. Export rasters, vectors, maps, and metadata
     print("[6/6] Exporting GeoTIFFs, vectors, maps, and JSON summary...")
 
@@ -209,21 +249,19 @@ def run_water_survey(
     write_raster(cfg.OUT / "gwpz_index.tif", gwpz_index, dtype="float32", nodata=np.nan)
 
     # B. Write Candidate CSV
+    candidate_fields = [
+        "rank", "latitude", "longitude", "potential_score", "class_name",
+        "distance_from_target_km", "elevation_m", "slope_degrees",
+        "height_above_channel_m", "depth_to_water_wet_m", "depth_to_water_dry_m",
+        "borehole_read", "landcover", "twi", "ndvi", "rainfall_mm_month",
+    ]
     csv_path = cfg.OUT / "candidate_borehole_sites.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "rank", "latitude", "longitude", "potential_score", "class_name", "distance_from_target_km"
-        ])
+        writer = csv.DictWriter(f, fieldnames=candidate_fields,
+                                extrasaction="ignore")
         writer.writeheader()
         for cand in candidates:
-            writer.writerow({
-                "rank": cand["rank"],
-                "latitude": cand["latitude"],
-                "longitude": cand["longitude"],
-                "potential_score": cand["potential_score"],
-                "class_name": cand["class_name"],
-                "distance_from_target_km": cand["distance_from_target_km"],
-            })
+            writer.writerow(cand)
 
     # C. Write Candidate GeoJSON
     geojson_features = []
@@ -231,12 +269,7 @@ def run_water_survey(
         geojson_features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [cand["longitude"], cand["latitude"]]},
-            "properties": {
-                "rank": cand["rank"],
-                "score": cand["potential_score"],
-                "class": cand["class_name"],
-                "dist_target_km": cand["distance_from_target_km"],
-            }
+            "properties": {key: cand.get(key) for key in candidate_fields if key != "rank"},
         })
     geojson_data = {"type": "FeatureCollection", "features": geojson_features}
     (cfg.OUT / "candidate_borehole_sites.geojson").write_text(json.dumps(geojson_data, indent=2))
@@ -256,11 +289,17 @@ def run_water_survey(
     t_twi = safe_round(twi_layer[tr, tc], 2)
     t_lin = safe_round(norm_lin[tr, tc] * 100, 1)
     t_ndvi = safe_round(ndvi_layer[tr, tc], 3)
+    t_elev = safe_round(dem[tr, tc], 1)
+    t_hac = safe_round(hac[tr, tc], 1)
+    t_wet = safe_round(water_table["wet"][tr, tc], 1)
+    t_dry = safe_round(water_table["dry"][tr, tc], 1)
+    t_landcover = cfg.LANDCOVER_NAMES.get(int(lc[tr, tc]) if np.isfinite(lc[tr, tc]) else None)
     del norm_lin
 
     # E. Render Cartographic Maps
     _render_evidence_map(dem, slope, twi_layer, lin_dens, ndvi_layer, rain, infil, drain_dens)
     del dem, slope, twi_layer, lin_dens, ndvi_layer, rain, infil, drain_dens
+    del hac, water_table["wet"], water_table["dry"]
     gc.collect()
 
     _render_main_map(gwpz_index, classes, hs, candidates, breaks)
@@ -279,11 +318,18 @@ def run_water_survey(
             "coordinate_cell_class": class_names.get(t_class),
             "parcel_mean_150m": safe_round(local_mean, 1),
             "parcel_class_150m": class_names.get(local_class),
+            "elevation_m": t_elev,
             "slope_degrees": t_slope,
             "twi": t_twi,
             "lineament_density_pct": t_lin,
             "ndvi": t_ndvi,
+            "landcover": t_landcover,
+            "height_above_channel_m": t_hac,
+            "depth_to_water_wet_m": t_wet,
+            "depth_to_water_dry_m": t_dry,
+            "borehole_read": depth.borehole_read(t_dry),
         },
+        "screening_depth_model": depth.groundwater_basis(),
         "model_weights": cfg.WATER_WEIGHTS,
         "natural_breaks": [round(float(b), 1) for b in breaks],
         "class_area_distribution": area_stats,

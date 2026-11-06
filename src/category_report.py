@@ -12,6 +12,7 @@ the dossier compiled from the same files.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape as _e
@@ -25,6 +26,19 @@ from src.report import _img_to_base64_src, _load_category, _survey_identity
 from src.utils.classification import NODATA_CLASS, NODATA_HEX
 
 NO_DATA_LABEL = "No satellite coverage"
+
+
+@dataclass(frozen=True)
+class DetailColumn:
+    """A ranked-table column built from the field numbers an engine attaches to a site.
+
+    ``keys`` are summary keys, not presentation strings, so the report table, the raster
+    viewer and the ZIP all read the same value the CSV and GeoJSON carry.
+    """
+
+    label: str
+    fmt: str
+    keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -55,6 +69,7 @@ class Category:
     zone_colors: dict[int, str] = field(default_factory=dict)
     cand_labels: dict[int, str] = field(default_factory=dict)
     hazard_raster: bool = False
+    detail_columns: tuple[DetailColumn, ...] = ()
 
 
 def _ramp(colors: list[str], labels: dict[int, str]) -> tuple[dict[int, str], dict[int, str]]:
@@ -144,6 +159,12 @@ WATER = Category(
     index_label="Groundwater Potential Index (0-100)",
     vector_base="candidate_borehole_sites",
     zone_labels=_WATER_LABELS, zone_colors=_WATER_COLORS, cand_labels=_WATER_LABELS,
+    detail_columns=(
+        DetailColumn("Depth to water (wet–dry)", "range_m",
+                     ("depth_to_water_wet_m", "depth_to_water_dry_m")),
+        DetailColumn("Borehole type", "text", ("borehole_read",)),
+        DetailColumn("Rise above valley floor", "m", ("height_above_channel_m",)),
+    ),
 )
 
 MINERALS = Category(
@@ -167,6 +188,12 @@ MINERALS = Category(
     index_label="Mineral Prospectivity Index (0-100)",
     vector_base="candidate_mineral_targets",
     zone_labels=_MINERAL_LABELS, zone_colors=_MINERAL_COLORS, cand_labels=_MINERAL_LABELS,
+    detail_columns=(
+        DetailColumn("Cover to fresh rock", "range_m",
+                     ("overburden_min_m", "overburden_max_m")),
+        DetailColumn("First test hole", "m", ("test_hole_depth_m",)),
+        DetailColumn("Sampling method", "text", ("sampling_method",)),
+    ),
 )
 
 SOIL = Category(
@@ -581,6 +608,10 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
   .site-list .rank { font-family: var(--font-mono); font-size: 10.5px; color: var(--on-cat); background: var(--cat);
     border-radius: 4px; padding: 1px 0; text-align: center; }
   .site-list .score { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .site-list .site-facts { margin-top: 2px; display: flex; flex-direction: column; gap: 1px; }
+  .site-list .site-facts div { display: flex; gap: 6px; font-size: 11px; line-height: 1.35; }
+  .site-list .site-facts span { color: var(--quiet); }
+  .site-list .site-facts b { color: var(--muted); font-weight: 600; }
   .footer {
     flex: 0 0 auto; padding: 10px 26px; font-size: 11px; color: var(--muted);
     background: var(--surface); border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 18px;
@@ -929,6 +960,9 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
       node.appendChild(tag);
       m.tag = tag;
       node.title = (m.target ? "Client target" : "Ranked site #" + m.rank) +
+        (m.site && m.site.facts && m.site.facts.length
+          ? " — " + m.site.facts.map(function (f) { return f[0] + ": " + f[1]; }).join("; ")
+          : "") +
         " — click the image to copy its coordinates";
       node.addEventListener("mouseenter", function () { flyTo(m.col, m.row); });
       overlay.appendChild(node);
@@ -1002,6 +1036,22 @@ VIEWER_TEMPLATE = """<!DOCTYPE html>
       small.style.color = "var(--quiet)";
       small.textContent = s.lat.toFixed(5) + ", " + s.lon.toFixed(5) + " · " + s.dist_km + " km";
       body.appendChild(small);
+      if (s.facts && s.facts.length) {
+        var field = document.createElement("div");
+        field.className = "mono site-facts";
+        s.facts.forEach(function (f) {
+          var line = document.createElement("div");
+          var key = document.createElement("span");
+          // The parenthetical carries the method, which the table header and the tooltip
+          // both hold; in a three-line list slot it only costs a wrap.
+          key.textContent = f[0].split(" (")[0];
+          var val = document.createElement("b");
+          val.textContent = f[1];
+          line.appendChild(key); line.appendChild(val);
+          field.appendChild(line);
+        });
+        body.appendChild(field);
+      }
       var score = document.createElement("span");
       score.className = "score";
       score.textContent = s.score.toFixed(1);
@@ -1198,7 +1248,10 @@ def get(key: str) -> Category:
 def _number(value) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    f = float(value)
+    # A summary can carry float("inf") as an open-ended limit; it must never reach a
+    # reader as the word "inf".
+    return f if math.isfinite(f) else None
 
 
 def _json_block(path: Path) -> tuple[dict | None, str]:
@@ -1384,7 +1437,6 @@ def inventory() -> dict:
     """All four categories plus the cross-category artefacts."""
     categories = [category_state(key) for key in CATEGORY_ORDER]
     ran = [c for c in categories if c["available"]]
-    dossier = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
     master = cfg.OUT / "master_site_dossier.json"
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1393,9 +1445,6 @@ def inventory() -> dict:
         "categories_complete": len(ran),
         "identity": next((c["identity"] for c in ran if c["identity"]), None),
         "master": {
-            "report": {"file": dossier.name, "exists": dossier.exists(),
-                       "bytes": dossier.stat().st_size if dossier.exists() else 0,
-                       "url": "/api/report"},
             "dossier": {"file": master.name, "exists": master.exists(),
                         "bytes": master.stat().st_size if master.exists() else 0,
                         "url": "/api/dossier"},
@@ -1428,6 +1477,40 @@ def _fmt_coord(value, digits: int = 5) -> str:
 
 def _fmt_label(value, fallback: str = "Not classified") -> str:
     return _e(str(value)) if value else fallback
+
+
+def _detail_cell(col: DetailColumn, item: dict) -> str:
+    """Render one field number for a ranked site, the same way in every surface that shows it."""
+    values = [_number(item.get(key)) for key in col.keys]
+    if col.fmt == "range_m":
+        low, high = values[0], values[1] if len(values) > 1 else None
+        if low is None and high is None:
+            return "N/A"
+        if low is None:
+            return f"up to {_fmt_score(high)} m"
+        if high is None:
+            return f"from {_fmt_score(low)} m"
+        if low == high:
+            return f"{_fmt_score(low)} m"
+        return f"{_fmt_score(low)}–{_fmt_score(high)} m"
+    if col.fmt in ("m", "deg", "pct"):
+        v = values[0]
+        if v is None:
+            return "N/A"
+        return f"{_fmt_score(v)}" + {"m": " m", "deg": "°", "pct": "%"}[col.fmt]
+    raw = item.get(col.keys[0])
+    return _e(str(raw)) if raw else "N/A"
+
+
+def _detail_cells(cat: Category, item: dict) -> list[tuple[str, str]]:
+    """Label/value pairs for one site, empty where the survey did not measure the field."""
+    return [(col.label, text) for col in cat.detail_columns
+            if (text := _detail_cell(col, item)) != "N/A"]
+
+
+def _assessment_of(data: dict) -> dict:
+    assess = data.get("target_assessment")
+    return assess if isinstance(assess, dict) else {}
 
 
 def _short_class(value) -> str:
@@ -1468,7 +1551,21 @@ _INDICATOR_LABELS = {
     "slope_degrees": "Slope (degrees)",
     "twi": "TWI (topographic wetness)",
     "lineament_density_pct": "Lineament density (%)",
+    "intersection_density_pct": "Lineament intersections (%)",
+    "iron_oxide_residual_pct": "Iron-oxide alteration (%)",
+    "hydroxyl_clay_residual_pct": "Hydroxyl/clay alteration (%)",
+    "ferrous_mafic_pct": "Ferrous/mafic fraction (%)",
+    "relative_relief_pct": "Relative relief (%)",
+    "endowment_context_pct": "Regional endowment context (%)",
     "ndvi": "NDVI (vegetation)",
+    "rainfall_mm_month": "Rainfall (mm per month)",
+    "elevation_m": "Elevation (m)",
+    "height_above_channel_m": "Rise above valley floor (m)",
+    "depth_to_water_wet_m": "Depth to water, wet season (m)",
+    "depth_to_water_dry_m": "Depth to water, dry season (m)",
+    "overburden_min_m": "Cover to fresh rock, thin end (m)",
+    "overburden_max_m": "Cover to fresh rock, thick end (m)",
+    "test_hole_depth_m": "First test hole (m)",
 }
 
 
@@ -1565,8 +1662,11 @@ REPORT_CSS = """
   .table-wrap { border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
     box-shadow: 0 1px 3px rgba(0,0,0,.04); overflow-x: auto; -webkit-overflow-scrolling: touch; }
   table.grid { width: 100%; min-width: 44rem; border-collapse: collapse; font-size: 12.5px; }
+  /* A three-column parameter table does not need the ranked table's swipe width, and
+     taking it would put a scrollbar under a table that already fits. */
+  table.grid--tight { min-width: 0; }
   table.grid th { background: var(--line-soft); color: #334155; text-align: left; padding: 11px 14px;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
     border-bottom: 1px solid var(--line); white-space: nowrap; }
   table.grid td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: middle; }
   table.grid tbody tr:hover td { background: #fafcfe; }
@@ -1770,6 +1870,103 @@ def _raster_section(cat: Category) -> str:
     </div>"""
 
 
+def _depth_section(cat: Category, data: dict) -> str:
+    """Show the depth column's arithmetic, because a depth that reads like a measurement
+    has to say how it was estimated before a crew is sent out on the strength of it."""
+    model = data.get("screening_depth_model")
+    if not isinstance(model, dict) or not model:
+        return ""
+
+    rows = []
+    bands = model.get("bands")
+    penetration = _number(model.get("test_hole_penetration_m"))
+    if isinstance(bands, list) and bands:
+        headers = ("Landform", "Slope", "Expected cover", "First test hole")
+        prev_cap = None
+        for band in bands:
+            if not isinstance(band, dict):
+                continue
+            cover = band.get("cover_m") or []
+            low = _number(cover[0]) if len(cover) > 0 else None
+            high = _number(cover[1]) if len(cover) > 1 else None
+            cap = _number(band.get("max_slope_deg"))
+            hole = high + penetration if high is not None and penetration is not None else None
+            # The last band is the catch-all, so its slope reads as whatever the previous
+            # band stopped short of, not as an unbounded "any".
+            if cap is None:
+                slope_cell = f"> {_fmt_score(prev_cap)}°" if prev_cap is not None else "any slope"
+            else:
+                slope_cell = f"≤ {_fmt_score(cap)}°"
+            rows.append((
+                _e(str(band.get("landform") or "N/A")),
+                slope_cell,
+                f"{_fmt_score(low)}–{_fmt_score(high)} m",
+                f"{_fmt_score(hole)} m",
+            ))
+            if cap is not None:
+                prev_cap = cap
+    else:
+        headers = ("Season", "At the valley floor", "Per metre of rise above it")
+        for label, key in (("Wet season", "wet_season"), ("Dry season", "dry_season")):
+            part = model.get(key)
+            if not isinstance(part, dict):
+                continue
+            floor = _number(part.get("floor_m"))
+            ratio = _number(part.get("ratio"))
+            if floor is None or ratio is None:
+                continue
+            rows.append((
+                _e(label),
+                f"{_fmt_score(floor)} m",
+                f"{_fmt_score(ratio)} m",
+            ))
+
+    if not rows:
+        return ""
+
+    is_cover = isinstance(bands, list) and bands
+    ceiling = _number(model.get("ceiling_m"))
+    limits = []
+    if ceiling is not None:
+        limits.append(f"estimates stop at {_fmt_score(ceiling)} m below surface")
+    dissected = _number(model.get("dissected_relief_m"))
+    if dissected is not None:
+        limits.append(f"ground broken by more than {_fmt_score(dissected)} m of local relief "
+                      "counts as stripped, and its band moves one step thinner")
+    cells = _number(model.get("channel_catchment_cells"))
+    if cells is not None:
+        # A cell count means nothing in the field; the ground it drains does.
+        km2 = cells * (cfg.CELL / 1000.0) ** 2
+        limits.append(f"a channel starts where about {_fmt_score(km2)} km&sup2; of rising ground drains in")
+
+    parts = []
+    if limits:
+        listed = "; ".join(limits)
+        # Only the groundwater model stops at a hard ceiling. The cover model just shifts
+        # a landform band, so calling that "capped" would claim a limit it does not have.
+        parts.append(f"The model is capped: {listed}." if ceiling is not None
+                     else f"{listed[0].upper()}{listed[1:]}.")
+    if is_cover:
+        parts.append("The cover is a landform band rather than a site measurement, so two targets "
+                     "on the same landform carry the same range.")
+    else:
+        parts.append("Open water and seasonally saturated ground are read from the land cover "
+                     "rather than from the relief.")
+    limit_line = " ".join(parts)
+
+    head = "".join(f"<th>{_e(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f'<td class="mono">{c}</td>' for c in row) + "</tr>"
+                   for row in rows)
+    confirm = _e(str(model.get("confirm_with") or ""))
+    return f"""
+    <div class="section-title">How deep to expect it</div>
+    <div class="note"><strong>Estimated, not measured.</strong>
+    {_e(str(model.get("basis") or "Method not recorded."))} {limit_line}</div>
+    <div class="table-wrap"><table class="grid grid--tight"><thead><tr>{head}</tr></thead>
+    <tbody>{body}</tbody></table></div>
+    <div class="note"><strong>Confirm before mobilising.</strong> {confirm}</div>"""
+
+
 def build_report_html(cat: Category, data: dict) -> str:
     """One category, one self-contained client document."""
     head = headline_of(cat, data)
@@ -1800,9 +1997,18 @@ def build_report_html(cat: Category, data: dict) -> str:
         f'style="color:{band(head["score"], lower_is_better=True)}">'
         f'{_fmt_out_of(head["score"])}</dd></div>'
     ) if cat.hazard_raster else ""
+    assess = _assessment_of(data)
+    detail_keys = {key for col in cat.detail_columns for key in col.keys}
+    # The depth story has its own columns and its own arithmetic panel; leaving these keys
+    # in the indicator strip would show "Overburden min m" beside its own range.
     indicators = "".join(
         f'<div class="fact"><dt>{_e(_weight_name(k))}</dt><dd class="mono">{_fmt_score(v)}</dd></div>'
-        for k, v in list(head["indicators"].items())[:4]
+        for k, v in [(k, v) for k, v in head["indicators"].items()
+                     if k not in detail_keys and _number(v) is not None][:4]
+    )
+    depth_facts = "".join(
+        f'<div class="fact"><dt>{_e(label)} at the target</dt><dd class="mono">{text}</dd></div>'
+        for label, text in _detail_cells(cat, assess)
     )
     breakdown = "".join(
         f'<div class="fact"><dt>{_e(_weight_name(k))}</dt><dd class="mono">{_fmt_out_of(v)}</dd></div>'
@@ -1826,6 +2032,7 @@ def build_report_html(cat: Category, data: dict) -> str:
           {hazard_note}
           <div class="fact"><dt>{_e(cat.candidate_noun)} sites ranked</dt><dd class="mono">{len(ranked)}</dd></div>
           <div class="fact"><dt>Nearest ranked site</dt><dd class="mono">{_fmt_distance(top.get("distance_from_target_km") if top else None)}</dd></div>
+          {depth_facts}
           <div class="fact"><dt>Field verification</dt><dd>{_e(cat.verification)}</dd></div>
           {indicators}
           {breakdown}
@@ -1844,6 +2051,9 @@ def build_report_html(cat: Category, data: dict) -> str:
     </div>"""
 
     # --- ranked table (every candidate, not the top three)
+    detail_headers = "".join(f"<th>{_e(col.label)}</th>" for col in cat.detail_columns)
+    base_headers = ("<th>Rank</th><th>Zone class</th><th>Latitude</th><th>Longitude</th>"
+                    f"<th>From target</th>{detail_headers}<th>Score</th>")
     if ranked:
         rows = []
         for item in ranked:
@@ -1852,6 +2062,8 @@ def build_report_html(cat: Category, data: dict) -> str:
             name = item.get("class_name") or cat.cand_labels.get(code, "Unclassified")
             if cat.hazard_raster:
                 name = cat.cand_labels.get(code, name)
+            details = "".join(f'<td class="mono">{_detail_cell(col, item)}</td>'
+                              for col in cat.detail_columns)
             rows.append(
                 "<tr>"
                 f'<td><span class="rank-chip">{_fmt_score(item.get("rank"))}</span></td>'
@@ -1859,22 +2071,22 @@ def build_report_html(cat: Category, data: dict) -> str:
                 f'<td class="mono">{_fmt_coord(item.get("latitude"))}</td>'
                 f'<td class="mono">{_fmt_coord(item.get("longitude"))}</td>'
                 f'<td class="mono">{_fmt_distance(item.get("distance_from_target_km"))}</td>'
+                + details +
                 f'<td><strong class="mono" style="color:{band(item.get("potential_score"))};">'
                 f'{_fmt_out_of(item.get("potential_score"))}</strong></td>'
                 "</tr>"
             )
         table = (
             '<div class="table-wrap"><table class="grid"><thead><tr>'
-            "<th>Rank</th><th>Zone class</th><th>Latitude</th><th>Longitude</th>"
-            "<th>From target</th><th>Score</th></tr></thead><tbody>"
+            + base_headers + "</tr></thead><tbody>"
             + "".join(rows) + "</tbody></table></div>"
         )
     else:
+        span = 6 + len(cat.detail_columns)
         table = (
             '<div class="table-wrap"><table class="grid"><thead><tr>'
-            "<th>Rank</th><th>Zone class</th><th>Latitude</th><th>Longitude</th>"
-            "<th>From target</th><th>Score</th></tr></thead><tbody><tr>"
-            '<td colspan="6" class="empty-row">No location cleared the screening threshold for this '
+            + base_headers + f'</tr></thead><tbody><tr><td colspan="{span}" class="empty-row">'
+            "No location cleared the screening threshold for this "
             "category in this survey area. The zoning map still shows the gradient that was found.</td>"
             "</tr></tbody></table></div>"
         )
@@ -1891,6 +2103,9 @@ def build_report_html(cat: Category, data: dict) -> str:
 
     # --- raster panel
     raster_html = _raster_section(cat)
+
+    # --- depth panel, only when the survey recorded how the depths were built
+    depth_html = _depth_section(cat, data)
 
     # --- model composition
     weights = data.get("model_weights") or data.get("weights_used") or {}
@@ -1978,6 +2193,7 @@ def build_report_html(cat: Category, data: dict) -> str:
     and weighted by distance from the property, so the second and third entries are the fallbacks when
     the highest-scoring cell is already occupied. On a phone, swipe the table sideways for the rest.</div>
     {table}
+    {depth_html}
 
     <div class="section-title">Survey cartography</div>
     <div class="maps-grid">{maps_html}</div>
@@ -2039,6 +2255,7 @@ def build_viewer_html(cat: Category, dec: dict, files: dict, data: dict | None) 
             "dist_km": _number(item.get("distance_from_target_km")) or 0.0,
             "label": cat.cand_labels.get(code, item.get("class_name") or "Unclassified"),
             "color": cat.zone_colors.get(code, NODATA_HEX),
+            "facts": [[label, text] for label, text in _detail_cells(cat, item)],
         })
 
     target = None

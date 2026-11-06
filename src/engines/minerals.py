@@ -48,6 +48,7 @@ from src.utils.classification import (
     safe_round,
     zone_class,
 )
+from src.utils import depth
 from src.utils.lineaments import detect_lineaments, extract_edges, lineament_density, lineament_intersections
 from src.utils.raster import robust_norm, safe_savefig, warp, write_raster
 from src.utils.spectral import ferrous_index, hydroxyl_index, iron_oxide_index, ndvi, residual_index
@@ -118,6 +119,14 @@ def run_minerals_survey(
     slope = slope_degrees(dem)
     relief = local_relief(dem)  # Height above the mean of the observed neighbourhood
 
+    # The same two terrain numbers that give roughness also say whether a cell is where
+    # material leaves or where it collects, which is what cover thickness turns on.
+    cover_low, cover_high, cover_band = depth.overburden(slope, relief)
+
+    # Roughness enters the prospectivity model as a magnitude; its sign only says
+    # whether the cell sits on a rise or in a hollow.
+    np.abs(relief, out=relief)
+
     # Known deposit locations (e.g. Golden Quarry Mine: -19.6127 S, 29.9842 E)
     from src.utils.raster import lonlat_to_pixel
     gq_row, gq_col = lonlat_to_pixel(29.9842, -19.6127)
@@ -133,7 +142,8 @@ def run_minerals_survey(
     norm_iron = robust_norm(iron_res)
     norm_hyd = robust_norm(hyd_res)
     norm_fer = robust_norm(fer_res)
-    norm_relief = robust_norm(np.abs(relief))
+    norm_relief = robust_norm(relief)
+    del relief
     norm_endow = robust_norm(endowment)
 
     w = cfg.MINERAL_WEIGHTS
@@ -148,7 +158,7 @@ def run_minerals_survey(
     )
 
     gold_index = robust_norm(index_raw) * 100.0
-    del index_raw, slope, relief, endowment
+    del index_raw, endowment
     gc.collect()
 
     water_mask = (lc == 80)
@@ -181,27 +191,73 @@ def run_minerals_survey(
     )
     print(f"      Identified {len(candidates)} high-potential mineral exploration targets")
 
+    def field_read(row: int, col: int) -> dict:
+        """
+        Everything a crew asks for at one cell: how thick the cover should be, how deep
+        the first hole has to go to prove it, and what each evidence layer reads there.
+        """
+        lc_code = int(lc[row, col]) if np.isfinite(lc[row, col]) else None
+        test_hole = depth.test_hole_depth(cover_high[row, col])
+        return {
+            "elevation_m": safe_round(dem[row, col], 1),
+            "slope_degrees": safe_round(slope[row, col], 1),
+            "overburden_min_m": safe_round(cover_low[row, col], 1),
+            "overburden_max_m": safe_round(cover_high[row, col], 1),
+            "overburden_landform": depth.landform_name(cover_band[row, col]),
+            "test_hole_depth_m": test_hole,
+            "sampling_method": depth.sampling_read(test_hole),
+            "lineament_density_pct": safe_round(norm_lin[row, col] * 100, 1),
+            "intersection_density_pct": safe_round(norm_inter[row, col] * 100, 1),
+            "iron_oxide_residual_pct": safe_round(norm_iron[row, col] * 100, 1),
+            "hydroxyl_clay_residual_pct": safe_round(norm_hyd[row, col] * 100, 1),
+            "ferrous_mafic_pct": safe_round(norm_fer[row, col] * 100, 1),
+            "relative_relief_pct": safe_round(norm_relief[row, col] * 100, 1),
+            "endowment_context_pct": safe_round(norm_endow[row, col] * 100, 1),
+            "landcover": cfg.LANDCOVER_NAMES.get(lc_code),
+        }
+
+    for cand in candidates:
+        cand.update(field_read(cand["row"], cand["col"]))
+        cand["field_notes"] = [
+            f"Cover: {cand['overburden_min_m']}-{cand['overburden_max_m']} m "
+            f"({cand['overburden_landform'] or 'landform not resolvable'})",
+            f"First test hole: {cand['test_hole_depth_m']} m — {cand['sampling_method']}",
+            f"Lineament density percentile: {cand['lineament_density_pct']}",
+            f"Elevation: {cand['elevation_m']} m | Slope: {cand['slope_degrees']}°",
+        ]
+
+    if candidates:
+        first = candidates[0]
+        print(f"      #1 cover expected {first['overburden_min_m']}-{first['overburden_max_m']} m"
+              f" over {first['overburden_landform']} — first test hole to "
+              f"{first['test_hole_depth_m']} m with {first['sampling_method']}")
+
+    # Snapshot the target before the layers it is read from are released
+    target_fields = field_read(tr, tc)
+    del dem, lc, slope, cover_low, cover_high, cover_band
+    gc.collect()
+
     # 6. Export outputs
     print("[6/6] Exporting GeoTIFFs, vectors, maps, and JSON summary...")
     write_raster(cfg.OUT / "mineral_prospectivity_zones.tif", classes, dtype="uint8", nodata=255)
     write_raster(cfg.OUT / "mineral_prospectivity_index.tif", gold_index, dtype="float32", nodata=np.nan)
 
     # Candidate CSV
+    candidate_fields = [
+        "rank", "latitude", "longitude", "potential_score", "class_name",
+        "distance_from_target_km", "elevation_m", "slope_degrees",
+        "overburden_min_m", "overburden_max_m", "overburden_landform",
+        "test_hole_depth_m", "sampling_method", "landcover",
+        "lineament_density_pct", "intersection_density_pct",
+        "iron_oxide_residual_pct", "hydroxyl_clay_residual_pct",
+        "ferrous_mafic_pct", "relative_relief_pct", "endowment_context_pct",
+    ]
     csv_path = cfg.OUT / "candidate_mineral_targets.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "rank", "latitude", "longitude", "potential_score", "class_name", "distance_from_target_km"
-        ])
+        writer = csv.DictWriter(f, fieldnames=candidate_fields, extrasaction="ignore")
         writer.writeheader()
         for cand in candidates:
-            writer.writerow({
-                "rank": cand["rank"],
-                "latitude": cand["latitude"],
-                "longitude": cand["longitude"],
-                "potential_score": cand["potential_score"],
-                "class_name": cand["class_name"],
-                "distance_from_target_km": cand["distance_from_target_km"],
-            })
+            writer.writerow(cand)
 
     # Candidate GeoJSON
     geojson_features = []
@@ -209,12 +265,7 @@ def run_minerals_survey(
         geojson_features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [cand["longitude"], cand["latitude"]]},
-            "properties": {
-                "rank": cand["rank"],
-                "score": cand["potential_score"],
-                "class": cand["class_name"],
-                "dist_target_km": cand["distance_from_target_km"],
-            }
+            "properties": {key: cand.get(key) for key in candidate_fields if key != "rank"},
         })
     (cfg.OUT / "candidate_mineral_targets.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": geojson_features}, indent=2))
 
@@ -245,8 +296,10 @@ def run_minerals_survey(
             "coordinate_cell_class": class_names.get(t_class),
             "parcel_mean_150m": safe_round(local_mean, 1),
             "parcel_class_150m": class_names.get(local_class),
+            **target_fields,
         },
         "model_weights": cfg.MINERAL_WEIGHTS,
+        "screening_depth_model": depth.overburden_basis(),
         "natural_breaks": [round(float(b), 1) for b in breaks],
         "class_area_distribution": area_stats,
         "candidate_targets": candidates,
@@ -257,7 +310,11 @@ def run_minerals_survey(
     from src.utils.export import export_candidates_kml, export_kmz
     kml_path = cfg.OUT / "candidate_mineral_targets.kml"
     kmz_path = cfg.OUT / "candidate_mineral_targets.kmz"
-    export_candidates_kml(candidates, kml_path, survey_name="Mineral Prospectivity")
+    export_candidates_kml(
+        candidates, kml_path, survey_name="Mineral Prospectivity",
+        footnote="Cover thickness and test-hole depth are DEM estimates to first ground, "
+                 "not ore depth — confirm with a pit or auger hole.",
+    )
     export_kmz(kml_path, kmz_path)
 
     print(f"\n[DONE] Mineral survey completed successfully! Outputs available in {cfg.OUT}")

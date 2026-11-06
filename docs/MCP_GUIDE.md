@@ -74,7 +74,7 @@ Focuses on Category 5: Multi-hazard environmental screening & site safety due di
 * **Returns**: Site Safety Score (0–100, 100=safest), flood history (from 40-year Landsat WOfS), slope failure risk, wildfire dry biomass fuel, and safest buildable coordinates.
 
 ### 6. `get_executive_dossier`
-Retrieves the consolidated cross-category executive scorecard and file path to the self-contained HTML report.
+Retrieves the consolidated cross-category executive scorecard and the path to the master JSON dossier on disk.
 
 ---
 
@@ -82,7 +82,6 @@ Retrieves the consolidated cross-category executive scorecard and file path to t
 
 Agents can read these virtual URIs directly:
 * `sitesurveyor://reports/master_dossier.json` — Structured JSON metadata of all scores and targets.
-* `sitesurveyor://reports/SiteSurveyor_Intelligence_Report.html` — The complete standalone executive report with embedded cartography.
 
 ---
 

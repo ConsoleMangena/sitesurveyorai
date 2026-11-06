@@ -147,7 +147,6 @@ JOB_TTL_SECONDS = 6 * 60 * 60
 # Artifact names the survey produces. Only files that actually exist are advertised:
 # a download link that 404s reads as a broken product, not as a partial run.
 DELIVERABLES = {
-    "html_report": "SiteSurveyor_Intelligence_Report.html",
     "master_json_dossier": "master_site_dossier.json",
     "boreholes_kmz": "candidate_borehole_sites.kmz",
     "minerals_kmz": "candidate_mineral_targets.kmz",
@@ -832,7 +831,6 @@ async def health_check():
             "api_soil": "/api/soil",
             "api_hazard": "/api/hazard",
             "api_dossier": "/api/dossier",
-            "api_report": "/api/report",
             "api_categories": "/api/categories",
             "api_category_report": "/api/report/{category}",
             "api_category_raster": "/api/raster/{category}",
@@ -1106,35 +1104,6 @@ def reset_workspace_endpoint(req: ResetRequest, request: Request):
             "kept": {"imagery": _storage_report()["imagery"]},
             "failed": failed,
         },
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@app.get("/api/report", tags=["Reports & Deliverables"])
-def get_report_endpoint():
-    """View the standalone HTML Executive Intelligence Dossier directly in the browser."""
-    html_path = cfg.OUT / "SiteSurveyor_Intelligence_Report.html"
-    if not html_path.exists():
-        if not _has_category_inputs():
-            raise _api_error(
-                404,
-                "no_survey",
-                "No survey has been run on this instance yet.",
-                "Run a survey; the report is compiled from the category summaries it writes.",
-            )
-        from src.report import generate_site_dossier
-        with _SITE_LOCK:
-            generate_site_dossier()
-    if not html_path.exists():
-        raise _api_error(
-            404,
-            "report_unavailable",
-            "No executive report has been generated yet.",
-            "Run a survey first; the report is written from its category outputs.",
-        )
-    return FileResponse(
-        html_path,
-        media_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
 

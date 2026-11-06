@@ -188,8 +188,8 @@ def test_cached_summary_reports_corruption_instead_of_silently_rerunning(tmp_pat
 # ---------------------------------------------------------------------------
 
 def test_dossier_builds_when_a_category_ran_but_found_no_candidates(tmp_path, monkeypatch):
-    """An all-void scene legitimately returns zero candidates; that used to crash the
-    HTML report on None.get and left the client with a JSON dossier and no report."""
+    """An all-void scene legitimately returns zero candidates; the scorecard must record
+    that as a null primary rather than crashing while compiling the JSON dossier."""
     import src.config as cfg
     monkeypatch.setattr(cfg, "OUT", tmp_path)
 
@@ -207,4 +207,4 @@ def test_dossier_builds_when_a_category_ran_but_found_no_candidates(tmp_path, mo
 
     assert dossier["category_status"]["soil_land"] == "loaded"
     assert dossier["executive_scorecard"]["soil_land"]["primary_agricultural_zone"] is None
-    assert (tmp_path / "SiteSurveyor_Intelligence_Report.html").exists()
+    assert (tmp_path / "master_site_dossier.json").exists()
